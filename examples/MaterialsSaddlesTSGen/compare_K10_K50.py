@@ -15,7 +15,7 @@ a histogram of the K10-vs-K50 RMSDs.
 Launch (1 node × 3 A100):
     accelerate launch --num_processes 3 --multi_gpu --mixed_precision bf16 \\
       compare_K10_K50.py \\
-        --ckpt-dir $SCRATCH/SaddleGen_mp20bat/runs/<RUN>/checkpoint_final \\
+        --ckpt-dir $SCRATCH/SaddleFlow_mp20bat/runs/<RUN>/checkpoint_final \\
         --num-cases 100
 """
 
@@ -42,14 +42,14 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from data_prep import ensure_subset, load_official_splits  # noqa: E402
 
-from saddlegen.data import MaterialsSaddlesDataset  # noqa: E402
-from saddlegen.flow import FlowMatchingConfig, FlowMatchingLoss  # noqa: E402
-from saddlegen.flow.sampler import sample_saddles  # noqa: E402
-from saddlegen.models import GlobalAttn, VelocityHead  # noqa: E402
-from saddlegen.models.time_filmed_backbone import TimeFiLMBackbone  # noqa: E402
-from saddlegen.utils import load_uma_backbone  # noqa: E402
-from saddlegen.utils.eval import rmsd_pbc  # noqa: E402
-from saddlegen.utils.forces import load_uma_force_head  # noqa: E402
+from saddleflow.data import MaterialsSaddlesDataset  # noqa: E402
+from saddleflow.flow import FlowMatchingConfig, FlowMatchingLoss  # noqa: E402
+from saddleflow.flow.sampler import sample_saddles  # noqa: E402
+from saddleflow.models import GlobalAttn, VelocityHead  # noqa: E402
+from saddleflow.models.time_filmed_backbone import TimeFiLMBackbone  # noqa: E402
+from saddleflow.utils import load_uma_backbone  # noqa: E402
+from saddleflow.utils.eval import rmsd_pbc  # noqa: E402
+from saddleflow.utils.forces import load_uma_force_head  # noqa: E402
 
 
 def parse_args():
@@ -137,7 +137,7 @@ def _build_loss_module(config: dict, device: str) -> FlowMatchingLoss:
     dimer_residual_alpha_init = float(extras.get("dimer_residual_alpha_init", 0.0))
     eigenmode_head = None
     if eigenmode_aux_w > 0 or dimer_force_C > 0 or use_dimer_residual:
-        from saddlegen.models import EigenmodeHead
+        from saddleflow.models import EigenmodeHead
         eigenmode_head = EigenmodeHead(
             sphere_channels=sc, input_lmax=lmax, depth=head_depth,
             delta_endpoint_channels=delta_C,
@@ -205,7 +205,7 @@ def load_model(ckpt_dir: Path, device: str, use_ema: bool = False):
     if unexpected:
         raise RuntimeError(f"unexpected keys in checkpoint: {unexpected[:5]}")
     if use_ema:
-        from saddlegen.utils.checkpointing import load_ema_weights
+        from saddleflow.utils.checkpointing import load_ema_weights
         load_ema_weights(str(ckpt_dir), [loss_module], device, use_ema=True)
     loss_module.eval()
     return loss_module, config

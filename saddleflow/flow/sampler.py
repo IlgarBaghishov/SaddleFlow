@@ -63,7 +63,7 @@ def sample_saddles(
             (`start_pos`, `Z`, `cell`, `fixed`, `task_name`, `charge`, `spin`).
             `start_pos` is the reactant (or product) structure in Å.
         backbone / global_attn / velocity_head: the UMA backbone and the two
-            SaddleGen modules. The caller is responsible for having set `.eval()`
+            SaddleFlow modules. The caller is responsible for having set `.eval()`
             on them; this routine does NOT toggle training mode.
         sigma_inf: Gaussian std (Å) for the inference-time perturbation that
             spreads initial Li positions around r_R before Euler integration.

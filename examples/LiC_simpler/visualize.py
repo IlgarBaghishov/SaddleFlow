@@ -35,11 +35,11 @@ from ase.io import Trajectory
 
 from fairchem.core.datasets.collaters.simple_collater import data_list_collater
 
-from saddlegen.data import atoms_to_sample_dict, mic_unwrap
-from saddlegen.flow.matching import apply_output_projections, build_atomic_data
-from saddlegen.flow.sampler import sample_saddles
-from saddlegen.models import GlobalAttn, VelocityHead
-from saddlegen.utils import cluster_by_rmsd, load_ema_weights, load_uma_backbone
+from saddleflow.data import atoms_to_sample_dict, mic_unwrap
+from saddleflow.flow.matching import apply_output_projections, build_atomic_data
+from saddleflow.flow.sampler import sample_saddles
+from saddleflow.models import GlobalAttn, VelocityHead
+from saddleflow.utils import cluster_by_rmsd, load_ema_weights, load_uma_backbone
 
 
 LI_INDEX = 112     # single Li adatom

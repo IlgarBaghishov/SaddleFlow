@@ -1,5 +1,5 @@
 """
-Evaluation utilities for SaddleGen.
+Evaluation utilities for SaddleFlow.
 
 Differs from MatterGen's eval in two important ways:
 

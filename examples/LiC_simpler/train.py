@@ -1,5 +1,5 @@
 """
-Train SaddleGen on the symmetric Li-on-pristine-graphene test case.
+Train SaddleFlow on the symmetric Li-on-pristine-graphene test case.
 
 Data: `one_saddle.traj` — a single `[R, S, P]` triplet for one Li-hop on a
 defect-free carbon sheet (112 C + 1 Li, Li at index 112). The graphene
@@ -17,10 +17,10 @@ from pathlib import Path
 
 import torch
 
-from saddlegen.data import TrajTripletDataset
-from saddlegen.flow import FlowMatchingConfig, FlowMatchingLoss
-from saddlegen.models import GlobalAttn, VelocityHead
-from saddlegen.utils import TrainingConfig, load_uma_backbone, train
+from saddleflow.data import TrajTripletDataset
+from saddleflow.flow import FlowMatchingConfig, FlowMatchingLoss
+from saddleflow.models import GlobalAttn, VelocityHead
+from saddleflow.utils import TrainingConfig, load_uma_backbone, train
 
 
 def parse_args():

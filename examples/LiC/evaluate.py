@@ -1,5 +1,5 @@
 """
-Evaluate a trained SaddleGen checkpoint on the Li-on-C test set.
+Evaluate a trained SaddleFlow checkpoint on the Li-on-C test set.
 
 The test set is grouped into UNIQUE LI ADSORPTION SITES (not just unique R
 positions). By microscopic reversibility, both R and P of every triplet are
@@ -20,7 +20,7 @@ The aggregate is reported separately for sites that also appear in train
 ("shared") vs. sites absent from train ("novel") — the latter measure is the
 actual cross-reactant generalisation test (CLAUDE.md §H1).
 
-All data wrangling + eval primitives live in `saddlegen`; this script is
+All data wrangling + eval primitives live in `saddleflow`; this script is
 argparse + the Li/C evaluation protocol.
 """
 
@@ -31,10 +31,10 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from saddlegen.data import atoms_to_sample_dict, load_validated_triplets, mic_unwrap
-from saddlegen.flow import sample_saddles
-from saddlegen.models import GlobalAttn, VelocityHead
-from saddlegen.utils import (
+from saddleflow.data import atoms_to_sample_dict, load_validated_triplets, mic_unwrap
+from saddleflow.flow import sample_saddles
+from saddleflow.models import GlobalAttn, VelocityHead
+from saddleflow.utils import (
     aggregate_reactants, evaluate_predictions, group_triplets_by_site,
     load_ema_weights, load_uma_backbone, match_sites, rmsd_pbc,
 )

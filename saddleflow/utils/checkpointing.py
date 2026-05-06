@@ -3,7 +3,7 @@ Load EMA weights from a training checkpoint into an inference-time module stack.
 
 Training writes `ema.pt` alongside `accelerator.save_state(...)` output; this
 file holds a flat list of shadow tensors parallel to the trainable parameters
-(see `saddlegen.utils.training.EMA`). At inference time we want those shadow
+(see `saddleflow.utils.training.EMA`). At inference time we want those shadow
 weights — not the point-estimate weights in the accelerator checkpoint — because
 they've been averaged over the training trajectory.
 """

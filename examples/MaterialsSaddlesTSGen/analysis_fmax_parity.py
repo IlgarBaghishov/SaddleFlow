@@ -133,7 +133,7 @@ def main():
                     label="better than baseline (below y=x)")
     ax.set_xlim(0, m); ax.set_ylim(0, m)
     ax.set_xlabel("(R+P)/2 baseline RMSD vs true saddle (Å)", fontsize=11)
-    ax.set_ylabel("SaddleGen prediction RMSD vs true saddle (Å)", fontsize=11)
+    ax.set_ylabel("SaddleFlow prediction RMSD vs true saddle (Å)", fontsize=11)
     ax.set_title(
         f"{label} — parity coloured by fmax at predicted structure\n"
         f"low fmax + far-from-true ⇒ predicted is near a different stationary point",

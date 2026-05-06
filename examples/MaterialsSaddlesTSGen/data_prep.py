@@ -43,7 +43,7 @@ def materials_saddles_root() -> Path:
     scratch = os.environ.get("SCRATCH")
     if not scratch:
         raise SystemExit(
-            "$SCRATCH is not set. SaddleGen pins the dataset under "
+            "$SCRATCH is not set. SaddleFlow pins the dataset under "
             "$SCRATCH/MaterialsSaddles so it works across machines — please "
             "export SCRATCH (TACC sets it automatically; on other clusters "
             "point it at a fast scratch path)."

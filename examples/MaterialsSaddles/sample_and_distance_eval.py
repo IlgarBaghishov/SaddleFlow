@@ -15,8 +15,8 @@ Multi-GPU: each rank loads the model and processes its 1/N share of cases;
 rank 0 merges, saves a `results.npz` (so plots can be regenerated without
 re-sampling), a `cases.pkl` (per-case raw arrays — variable N), and writes two
 JointGrid-style plots (parity scatter + marginal histograms), one linear-axis
-and one log-axis. Reuses `saddlegen.utils.eval.rmsd_pbc` for the metric and
-`saddlegen.flow.sampler.sample_saddles` for inference.
+and one log-axis. Reuses `saddleflow.utils.eval.rmsd_pbc` for the metric and
+`saddleflow.flow.sampler.sample_saddles` for inference.
 
 Launch (1 node × 3 A100):
     accelerate launch --num_processes 3 --multi_gpu --mixed_precision bf16 \\
@@ -52,9 +52,9 @@ import matplotlib.pyplot as plt
 
 # Reach the on-scratch data_prep module (official-split loader). Only used to
 # resolve the shards directory + read the train/val/test parquet splits.
-# Override via SADDLEGEN_RUN_DIR; otherwise the bundled examples copy is used.
+# Override via SADDLEFLOW_RUN_DIR; otherwise the bundled examples copy is used.
 RUN_DIR_DEFAULT = os.environ.get(
-    "SADDLEGEN_RUN_DIR",
+    "SADDLEFLOW_RUN_DIR",
     str(Path(__file__).resolve().parents[1] / "MaterialsSaddlesTSGen"),
 )
 sys.path.insert(0, RUN_DIR_DEFAULT)
@@ -62,14 +62,14 @@ from data_prep import ensure_subset, load_official_splits  # noqa: E402
 
 from ase.io import Trajectory  # noqa: E402
 
-from saddlegen.data import MaterialsSaddlesDataset  # noqa: E402
-from saddlegen.flow import FlowMatchingConfig, FlowMatchingLoss  # noqa: E402
-from saddlegen.flow.sampler import sample_saddles  # noqa: E402
-from saddlegen.models import GlobalAttn, VelocityHead  # noqa: E402
-from saddlegen.models.time_filmed_backbone import TimeFiLMBackbone  # noqa: E402
-from saddlegen.utils import load_uma_backbone  # noqa: E402
-from saddlegen.utils.eval import rmsd_pbc  # noqa: E402
-from saddlegen.utils.forces import load_uma_force_head  # noqa: E402
+from saddleflow.data import MaterialsSaddlesDataset  # noqa: E402
+from saddleflow.flow import FlowMatchingConfig, FlowMatchingLoss  # noqa: E402
+from saddleflow.flow.sampler import sample_saddles  # noqa: E402
+from saddleflow.models import GlobalAttn, VelocityHead  # noqa: E402
+from saddleflow.models.time_filmed_backbone import TimeFiLMBackbone  # noqa: E402
+from saddleflow.utils import load_uma_backbone  # noqa: E402
+from saddleflow.utils.eval import rmsd_pbc  # noqa: E402
+from saddleflow.utils.forces import load_uma_force_head  # noqa: E402
 
 
 def save_4frame_traj(out_path: Path, R_atoms, S_atoms, P_atoms,
@@ -230,7 +230,7 @@ def _build_loss_module(config: dict, device: str) -> FlowMatchingLoss:
     dimer_residual_alpha_init = float(extras.get("dimer_residual_alpha_init", 0.0))
     eigenmode_head = None
     if eigenmode_aux_w > 0 or dimer_force_C > 0 or use_dimer_residual:
-        from saddlegen.models import EigenmodeHead
+        from saddleflow.models import EigenmodeHead
         # v7-4-redesign: EigenmodeHead is a VelocityHead subclass and is
         # constructed with the same architecture args. Mirror what the
         # training run did so the saved weights load cleanly.
@@ -316,7 +316,7 @@ def load_model(ckpt_dir: Path, device: str, use_ema: bool = False):
         # fail loud rather than silently using random weights.
         raise RuntimeError(f"unexpected keys in checkpoint: {unexpected[:5]}")
     if use_ema:
-        from saddlegen.utils.checkpointing import load_ema_weights
+        from saddleflow.utils.checkpointing import load_ema_weights
         load_ema_weights(str(ckpt_dir), [loss_module], device, use_ema=True)
         print(f"[load] overlaid EMA shadow from {ckpt_dir}/ema.pt")
     loss_module.eval()
@@ -450,17 +450,17 @@ def joint_plot(x: np.ndarray, y: np.ndarray, *, log: bool, out_path: Path,
     # y = x reference
     ax_main.plot([lo, hi], [lo, hi], "k--", linewidth=1, alpha=0.6, label="y = x")
 
-    # Color points by who wins this case (below the line = SaddleGen better)
-    saddlegen_better = y_p < x_p
+    # Color points by who wins this case (below the line = SaddleFlow better)
+    saddleflow_better = y_p < x_p
     ax_main.scatter(
-        x_p[saddlegen_better], y_p[saddlegen_better],
+        x_p[saddleflow_better], y_p[saddleflow_better],
         s=55, color="tab:blue", edgecolor="black", linewidth=0.5, alpha=0.85,
-        label=f"SaddleGen better ({int(saddlegen_better.sum())}/{len(x_p)})",
+        label=f"SaddleFlow better ({int(saddleflow_better.sum())}/{len(x_p)})",
     )
     ax_main.scatter(
-        x_p[~saddlegen_better], y_p[~saddlegen_better],
+        x_p[~saddleflow_better], y_p[~saddleflow_better],
         s=55, color="tab:red", edgecolor="black", linewidth=0.5, alpha=0.85,
-        label=f"baseline better ({int((~saddlegen_better).sum())}/{len(x_p)})",
+        label=f"baseline better ({int((~saddleflow_better).sum())}/{len(x_p)})",
     )
 
     ax_main.set_xlim(lo, hi)
@@ -470,7 +470,7 @@ def joint_plot(x: np.ndarray, y: np.ndarray, *, log: bool, out_path: Path,
     ax_main.legend(loc="upper left", fontsize=9, framealpha=0.95)
     ax_main.grid(True, which="both", alpha=0.25)
 
-    # Marginals (top = baseline, right = SaddleGen)
+    # Marginals (top = baseline, right = SaddleFlow)
     ax_top.hist(x_p, bins=bins, color="tab:red", edgecolor="black",
                 linewidth=0.4, alpha=0.85)
     ax_top.set_ylabel("count")
@@ -498,7 +498,7 @@ def make_plots(npz_path: Path, out_dir: Path) -> None:
     rmsd_p = d["rmsd_pred_all"]
     rmsd_b = d["rmsd_base_all"]
     summary = (f"N={n}  K={int(d['K'])}  seed={int(d['seed'])}\n"
-               f"SaddleGen mean={rmsd_p.mean():.4f}Å median={np.median(rmsd_p):.4f}Å\n"
+               f"SaddleFlow mean={rmsd_p.mean():.4f}Å median={np.median(rmsd_p):.4f}Å\n"
                f"(R+P)/2  mean={rmsd_b.mean():.4f}Å median={np.median(rmsd_b):.4f}Å")
     print(f"[plot] summary:\n{summary}")
 
@@ -509,7 +509,7 @@ def make_plots(npz_path: Path, out_dir: Path) -> None:
             out_path=out_dir / f"parity_all_atoms{suffix}.png",
             title=f"Saddle prediction RMSD (all atoms) — {summary}",
             x_label="(R+P)/2 baseline RMSD (Å)",
-            y_label="SaddleGen prediction RMSD (Å)",
+            y_label="SaddleFlow prediction RMSD (Å)",
         )
 
     # Mobile-only metric is identical to all-atom unless any cases had FixAtoms;
@@ -524,7 +524,7 @@ def make_plots(npz_path: Path, out_dir: Path) -> None:
                 out_path=out_dir / f"parity_mobile_only{suffix}.png",
                 title=f"Saddle prediction RMSD (mobile atoms only)\n{summary}",
                 x_label="(R+P)/2 baseline RMSD (Å)",
-                y_label="SaddleGen prediction RMSD (Å)",
+                y_label="SaddleFlow prediction RMSD (Å)",
             )
 
 

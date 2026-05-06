@@ -3,13 +3,13 @@ requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
-name = "saddlegen"
+name = "saddleflow"
 version = "0.0.1"
 description = "Flow-matching generation of transition-state structures for periodic materials, conditioned on the reactant alone."
 license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.11, <3.14"
-authors = [{name = "Ilgar Baghishov"}]
+authors = [{name = "Anonymous"}]
 dependencies = [
     # Pinned against fairchem-core 2.19.0+ (other_codes/fairchem @ fairchem_core-2.19.0-23-g263bf0f52).
     # Constraints below mirror fairchem-core/pyproject.toml so pip resolves a single env.
@@ -34,4 +34,4 @@ dev = ["pre-commit", "pytest", "pytest-cov", "ruff==0.5.1"]
 extras = ["pymatgen>=2025.1.9"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["saddlegen"]
+packages = ["saddleflow"]

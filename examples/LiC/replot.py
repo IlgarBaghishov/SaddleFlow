@@ -19,7 +19,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 
-from saddlegen.utils import cluster_by_rmsd
+from saddleflow.utils import cluster_by_rmsd
 
 from visualize import (plot_trajectories, plot_velocity_field, _pbc_split,
                         _draw_carbon_sheet)

@@ -1,5 +1,5 @@
 """
-Flow-matching training loss for SaddleGen.
+Flow-matching training loss for SaddleFlow.
 
 Each `mode` of `FlowMatchingConfig` defines exactly one straight-line OT
 objective; modes are mutually exclusive (no per-sample mixing):

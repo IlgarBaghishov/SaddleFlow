@@ -1,8 +1,8 @@
-# SaddleGen
+# SaddleFlow
 
 Generative AI for **transition-state discovery** in periodic materials.
 
-Given only a reactant geometry, SaddleGen proposes plausible saddle-point structures — no product state required. The target use case is reaction discovery for batteries, catalysts, and bulk materials, where current workflows (NEB, Dimer) require an a-priori guess of the reaction's end state.
+Given only a reactant geometry, SaddleFlow proposes plausible saddle-point structures — no product state required. The target use case is reaction discovery for batteries, catalysts, and bulk materials, where current workflows (NEB, Dimer) require an a-priori guess of the reaction's end state.
 
 ## Status
 
@@ -16,8 +16,8 @@ See [`CLAUDE.md`](CLAUDE.md) for the full methods specification, and [`examples/
 ## Installation
 
 ```bash
-conda create -n saddlegen python=3.12 -y
-conda activate saddlegen
+conda create -n saddleflow python=3.12 -y
+conda activate saddleflow
 pip install -e .
 ```
 
@@ -33,10 +33,10 @@ First UMA load downloads the `uma-s-1p2` checkpoint from HuggingFace and require
 import torch
 from ase.io import read
 
-from saddlegen.data import atoms_to_sample_dict
-from saddlegen.flow import sample_saddles
-from saddlegen.models import GlobalAttn, VelocityHead
-from saddlegen.utils import load_ema_weights, load_uma_backbone
+from saddleflow.data import atoms_to_sample_dict
+from saddleflow.flow import sample_saddles
+from saddleflow.models import GlobalAttn, VelocityHead
+from saddleflow.utils import load_ema_weights, load_uma_backbone
 
 # Load a trained checkpoint.
 ckpt_dir = "examples/LiC/runs/icecream_winner/checkpoint_final"
@@ -109,7 +109,7 @@ This produces a per-checkpoint `trajectories.png` with Li trajectories fanning o
 
 ## Author
 
-Ilgar Baghishov, Henkelman group, University of Texas at Austin.
+Anonymous (double-blind submission).
 
 ## License
 

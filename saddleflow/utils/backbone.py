@@ -1,5 +1,5 @@
 """
-Load a pretrained fairchem/UMA backbone for use inside a SaddleGen model.
+Load a pretrained fairchem/UMA backbone for use inside a SaddleFlow model.
 
 This is a thin wrapper around `fairchem.core.calculate.pretrained_mlip.get_predict_unit`
 that strips the EMA wrapper and UMA's output heads, returning only the

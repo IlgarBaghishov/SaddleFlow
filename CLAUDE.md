@@ -1,14 +1,14 @@
 # CLAUDE.md
 
-## What is SaddleGen
+## What is SaddleFlow
 
-SaddleGen is a PyTorch library for generating transition-state (saddle-point) structures for periodic materials, given only the reactant (initial) state. The target use case is **reaction discovery**: propose plausible saddles from a reactant alone, without needing a guessed product. An optional future mode will also accept a product state to condition toward a specific reaction; the reactant-only mode is the main research contribution.
+SaddleFlow is a PyTorch library for generating transition-state (saddle-point) structures for periodic materials, given only the reactant (initial) state. The target use case is **reaction discovery**: propose plausible saddles from a reactant alone, without needing a guessed product. An optional future mode will also accept a product state to condition toward a specific reaction; the reactant-only mode is the main research contribution.
 
 The ML method is **flow matching** (extendable to MeanFlow). The velocity field is a three-stage module: Meta FAIR's pretrained **UMA** (`uma-s-1p2`) as the local-equivariant backbone, a light **invariant-weighted equivariant global self-attention** layer (`GlobalAttn`) that allows distant atoms to coordinate which one reacts, and a small `VelocityHead` that projects the globally-aware per-atom features to per-atom velocity vectors.
 
 ## Audience / style anchor
 
-Code targets a computational chemist who reads PyTorch fluently and knows ASE and pymatgen. Style reference: `../GenFlows` (Ilgar's previous project) — pure PyTorch, minimal abstractions, clean "methods are pure math, models handle conditioning" separation. Target total size: ~1–2k lines excluding docs and the fairchem dependency. Use ASE and fairchem wherever possible to avoid reinventing; avoid heavy config / framework layers (Hydra, PyTorch Lightning, TorchTNT) unless they buy real value.
+Code targets a computational chemist who reads PyTorch fluently and knows ASE and pymatgen. Style reference: a previous flow-matching project by the same author — pure PyTorch, minimal abstractions, clean "methods are pure math, models handle conditioning" separation. Target total size: ~1–2k lines excluding docs and the fairchem dependency. Use ASE and fairchem wherever possible to avoid reinventing; avoid heavy config / framework layers (Hydra, PyTorch Lightning, TorchTNT) unless they buy real value.
 
 ## Architecture
 
@@ -48,7 +48,7 @@ Sits between the UMA backbone and the head. The **original motivation** was: whe
 
 ### Head — `VelocityHead`
 
-Custom. Mirrors fairchem's `Linear_Force_Head` at depth=1 + time-FiLM, with optional Mode-1 conditioning paths (Δ_partner injection at `delta_endpoint_channels > 0`, force injection at `force_field_channels > 0`, force-residual at output) that are zero-init so the head is bit-for-bit a force-head when those switches are off. Implementation lives in `saddlegen/models/velocity_head.py`. **Production default (v6) uses depth=3 + Δ_P channels=32 + force channels=32, no force-residual** (see "Mode 1 architecture sweep" for why).
+Custom. Mirrors fairchem's `Linear_Force_Head` at depth=1 + time-FiLM, with optional Mode-1 conditioning paths (Δ_partner injection at `delta_endpoint_channels > 0`, force injection at `force_field_channels > 0`, force-residual at output) that are zero-init so the head is bit-for-bit a force-head when those switches are off. Implementation lives in `saddleflow/models/velocity_head.py`. **Production default (v6) uses depth=3 + Δ_P channels=32 + force channels=32, no force-residual** (see "Mode 1 architecture sweep" for why).
 
 **Implementation note: uses UMA's `SO3_Linear`, not e3nn's `o3.Linear`.** UMA stores irreps as `(N, (lmax+1)², C)` while e3nn flattens them to `(N, Irreps.dim)` — using e3nn would require ~50 lines of layout-conversion plumbing at every module boundary. `SO3_Linear` is the equivalent equivariant operation (independent per-l weights, bias only on `l=0`) and keeps us in UMA's native layout. The `UMAGate` nonlinearity (for `depth ≥ 2`) is a small hand-rolled equivalent of `e3nn.nn.Gate` that also works in UMA's layout — SiLU on `l=0` channels, sigmoid-of-linear(l=0) as a multiplicative gate on `l≥1` channels.
 
@@ -73,7 +73,7 @@ Hyperparameters pinned: `time_embed_dim=64`, `time_mlp_hidden=128`, zero-init on
 ### Output projections (applied after the head, in order)
 
 1. **Hard mask for frozen atoms:** `v[fixed] = 0`. ASE's `FixAtoms` constraint is enforced, not learned.
-2. **Per-system Center-of-mass projection on mobile atoms — conditional:** `v[mobile] −= v[mobile].mean(dim=0, keepdim=True)`, applied **only for systems with zero frozen atoms**. Skipped for any system with at least one frozen atom. Implemented in `saddlegen/flow/matching.py::_com_projection_batched`.
+2. **Per-system Center-of-mass projection on mobile atoms — conditional:** `v[mobile] −= v[mobile].mean(dim=0, keepdim=True)`, applied **only for systems with zero frozen atoms**. Skipped for any system with at least one frozen atom. Implemented in `saddleflow/flow/matching.py::_com_projection_batched`.
 
 **Why conditional — critical gotcha, don't remove this check.** The motivation for CoM projection is to remove the translational-symmetry degree of freedom so the network can't drift the whole system through space. That argument only applies to fully-mobile systems. **When frozen atoms are present they already pin the reference frame**, so there is no translational symmetry left for the network to abuse.
 
@@ -132,7 +132,7 @@ The key property: **the region has finite support entirely inside one angular we
 - `alpha` (default `0.5`) — cone lateral half-angle is `arcsin(alpha)`. `alpha=0.5` gives 30°, which fits inside a C_6v wedge exactly.
 - `R_max_abs` (default `1.0 Å`) — absolute cap on `R_TS`. Prevents the cone from becoming so large on reactions with big `|Δ|` that it overlaps neighbouring saddles.
 
-Both defaults were validated on LiC (|Δ| ≈ 1.24 Å) and produce the "flower" field with no drift. See `saddlegen/flow/matching.py::sample_icecream_cone` for the rejection-sampling implementation.
+Both defaults were validated on LiC (|Δ| ≈ 1.24 Å) and produce the "flower" field with no drift. See `saddleflow/flow/matching.py::sample_icecream_cone` for the rejection-sampling implementation.
 
 ### How the cone relates to the previously-failed multi-objective scheme
 
@@ -226,7 +226,7 @@ Optional: Dimer-refine each centroid using fairchem's ASE Calculator (UMA potent
 
 ## Training data
 
-- **~30 million (reactant, saddle, product) triplets**, from Henkelman group searches (NEB + Dimer) over Materials Project, ICSD, Alexandria, OC20, and OC22.
+- **~30 million (reactant, saddle, product) triplets**, from large-scale NEB + Dimer searches over Materials Project, ICSD, Alexandria, OC20, and OC22.
 - Same atom count, same constant cell, aligned atom indices across each triplet. Optional `FixAtoms` constraints preserved.
 - **Source format:** ASE `.traj` files with per-frame metadata in `atoms.info` (includes the `task_name` per sample for UMA's MoE routing).
 - Currently all 3D PBC; slabs and molecules are a future-compatible add-on (UMA supports all three via `task_name`).
@@ -236,8 +236,8 @@ Optional: Dimer-refine each centroid using fairchem's ASE Calculator (UMA potent
 
 **Source** is always ASE `.traj` files containing flat `[R₁, S₁, P₁, R₂, S₂, P₂, …]` sequences (one frame each for reactant/saddle/product; `atoms.info['side'] ∈ {-1, 0, 1}` labels them). We deliberately support two downstream read paths, chosen by scale:
 
-- **Backend A — read `.traj` directly** (`saddlegen.data.TrajTripletDataset`). No conversion step. Used for the Li/C test and any moderate-size problem where iterating fast matters more than throughput. `ase.io.Trajectory` has O(1) random-access via its frame index.
-- **Backend B — one-time conversion to ASE-DB** (`saddlegen.data.convert_to_db` → `AseDbSaddleDataset`). Used for the 30M run and anywhere we want queryable metadata or fast random access across many files. Output format follows the file extension:
+- **Backend A — read `.traj` directly** (`saddleflow.data.TrajTripletDataset`). No conversion step. Used for the Li/C test and any moderate-size problem where iterating fast matters more than throughput. `ase.io.Trajectory` has O(1) random-access via its frame index.
+- **Backend B — one-time conversion to ASE-DB** (`saddleflow.data.convert_to_db` → `AseDbSaddleDataset`). Used for the 30M run and anywhere we want queryable metadata or fast random access across many files. Output format follows the file extension:
   - `*.db` / `*.sqlite` — SQLite (human-inspectable; OK up to a few million rows).
   - `*.aselmdb` — LMDB-backed ASE-DB via the `ase-db-backends` package (fairchem's production format; the right choice at 30M scale).
 
@@ -271,7 +271,7 @@ Both backends expose the same per-sample dict so `matching.py`, `sampler.py`, an
 
 - Frozen C-sheet with two C-vacancy defects (`FixAtoms` on all carbon). `FixAtoms` indices 0–125; **Li is atom index 126**, the only mobile atom.
 - Cell diag `[17.09, 19.56, -15.00]` (negative `z` is the vacuum direction — left-handed cell, but MIC math / fairchem neighbor-list handle it fine).
-- `atoms.info` carries `task_name='omat'`, `charge=0`, `spin=0`, plus Henkelman-pipeline keys (`band_converged`, `frozen_set`, `image_idx`, etc.). **No `side` key** — `validate_triplet` falls back to positional ordering `[R, S, P, R, S, P, …]`.
+- `atoms.info` carries `task_name='omat'`, `charge=0`, `spin=0`, plus search-pipeline keys (`band_converged`, `frozen_set`, `image_idx`, etc.). **No `side` key** — `validate_triplet` falls back to positional ordering `[R, S, P, R, S, P, …]`.
 - Sizes: `train_set.traj` — 12 triplets; `test_set.traj` — 171 triplets.
 
 **Site-level structure (R↔P-symmetric count).** Every triplet contributes **two** local-minimum Li sites (R and P; both are "reactants" by microscopic reversibility), so counting saddles per site must include both endpoints. The numbers that result match the hexagonal-lattice physics:
@@ -290,7 +290,7 @@ The ~6/site median for test matches the hex lattice: each Li adsorption site has
 
 Pairwise Li-Li distance between reactant sites is **perfectly bimodal**: either `<0.01 Å` (exact duplicate — the same site reused across many triplets to different products) or `>1.5 Å` (genuinely different adsorption sites). Any clustering threshold in that gap gives the same 63 sites.
 
-**Evaluation protocol (leave-one-reactant-out style, per-site):** for each unique site in test, run the sampler once (`n_perturbations=32` candidates) from that site's representative endpoint, cluster candidates by PBC-RMSD, and Hungarian-match centroids to the site's known saddles (typically 3–7). Report ALL / NOVEL / SHARED aggregates separately — NOVEL (47 sites) is the real H1 number. Implemented in `examples/LiC/evaluate.py` via `saddlegen.utils.group_triplets_by_site(endpoints="RP")` and `match_sites(…)`.
+**Evaluation protocol (leave-one-reactant-out style, per-site):** for each unique site in test, run the sampler once (`n_perturbations=32` candidates) from that site's representative endpoint, cluster candidates by PBC-RMSD, and Hungarian-match centroids to the site's known saddles (typically 3–7). Report ALL / NOVEL / SHARED aggregates separately — NOVEL (47 sites) is the real H1 number. Implemented in `examples/LiC/evaluate.py` via `saddleflow.utils.group_triplets_by_site(endpoints="RP")` and `match_sites(…)`.
 
 Fully 2D-visualizable, interpretable by eye, small enough to iterate quickly.
 
@@ -356,15 +356,15 @@ Li/C example runs use `--ema-decay 0.99`. `examples/LiC/evaluate.py` also suppor
 
 ### Why not fairchem's full training stack (TorchTNT + Hydra + Ray)
 
-Considered carefully. Fairchem's infra is designed for multi-task MLIP training (energy + force + stress, dataset-specific heads, Ray job orchestration). SaddleGen has one regression task (velocity), one head, one loss. Adopting `MLIPTrainEvalUnit` + `TrainEvalRunner` + Hydra would add ~1000 lines of framework machinery to hide the training loop. `accelerate` covers 100% of the actual technical requirements — including FSDP and multi-node at UMA-S-1.2 scale (6.6M active params, 290M total with all MoE experts merged) — while keeping the loop ~150 readable lines. The 290M-total figure drives FSDP planning when the full expert set must reside in memory; the 6.6M-active figure governs per-batch compute.
+Considered carefully. Fairchem's infra is designed for multi-task MLIP training (energy + force + stress, dataset-specific heads, Ray job orchestration). SaddleFlow has one regression task (velocity), one head, one loss. Adopting `MLIPTrainEvalUnit` + `TrainEvalRunner` + Hydra would add ~1000 lines of framework machinery to hide the training loop. `accelerate` covers 100% of the actual technical requirements — including FSDP and multi-node at UMA-S-1.2 scale (6.6M active params, 290M total with all MoE experts merged) — while keeping the loop ~150 readable lines. The 290M-total figure drives FSDP planning when the full expert set must reside in memory; the 6.6M-active figure governs per-batch compute.
 
-The migration path to fairchem's full stack remains open and is localized to `saddlegen/utils/training.py`. We are not painting ourselves into a corner.
+The migration path to fairchem's full stack remains open and is localized to `saddleflow/utils/training.py`. We are not painting ourselves into a corner.
 
 ## Evaluation
 
-**Site-based (not R-only) grouping.** Test triplets are grouped by their **R ∪ P** Li adsorption sites — both endpoints of every triplet are legitimate "reactants" by microscopic reversibility, and counting saddles per site must include both for the numbers to match the physics (see §"First test case" for concrete counts). Implemented as `saddlegen.utils.group_triplets_by_site(endpoints="RP")`; the legacy R-only variant is available via `endpoints="R"` but should not be the default for reaction-discovery eval.
+**Site-based (not R-only) grouping.** Test triplets are grouped by their **R ∪ P** Li adsorption sites — both endpoints of every triplet are legitimate "reactants" by microscopic reversibility, and counting saddles per site must include both for the numbers to match the physics (see §"First test case" for concrete counts). Implemented as `saddleflow.utils.group_triplets_by_site(endpoints="RP")`; the legacy R-only variant is available via `endpoints="R"` but should not be the default for reaction-discovery eval.
 
-**Per-site Hungarian matching, with outlier-safe thresholding.** For each unique site, cluster candidates (medoid centroids) and run `scipy.optimize.linear_sum_assignment` against that site's known saddles. LSA minimises total cost and does not respect a per-pair threshold by itself — a single far-off centroid can cascade into a globally-optimal but individually-pathological assignment. Fix: mask above-threshold cost-matrix entries to `1e9` before LSA so it prefers sub-threshold pairings and only pairs across the threshold when unavoidable (then filtered post-LSA). Implemented in `saddlegen.utils.hungarian_match`.
+**Per-site Hungarian matching, with outlier-safe thresholding.** For each unique site, cluster candidates (medoid centroids) and run `scipy.optimize.linear_sum_assignment` against that site's known saddles. LSA minimises total cost and does not respect a per-pair threshold by itself — a single far-off centroid can cascade into a globally-optimal but individually-pathological assignment. Fix: mask above-threshold cost-matrix entries to `1e9` before LSA so it prefers sub-threshold pairings and only pairs across the threshold when unavoidable (then filtered post-LSA). Implemented in `saddleflow.utils.hungarian_match`.
 
 **Primary metric:** RMSD under PBC between each predicted cluster centroid and its nearest known reference saddle (Hungarian assignment per site).
 
@@ -395,7 +395,7 @@ For the methods-section writeup. Each hypothesis has an explicit falsification t
 ## Planned layout (subject to refinement during implementation)
 
 ```
-saddlegen/
+saddleflow/
 ├── data/
 │   ├── core.py                    # shared: MIC unwrap, triplet validation, R/P doubling, stats
 │   ├── traj_dataset.py            # backend A: read .traj directly (TrajTripletDataset)
@@ -420,11 +420,11 @@ examples/
 └── LiC/
     ├── train_set.traj             # [R1,S1,P1, R2,S2,P2, ...] no `side` keys — fall back to positional ordering
     ├── test_set.traj              # same format
-    ├── train.py                   # argparse + wire saddlegen.* helpers; no generic code
+    ├── train.py                   # argparse + wire saddleflow.* helpers; no generic code
     └── evaluate.py                # argparse + Li/C eval protocol (group by reactant, sample, match)
 ```
 
-Package import name: `saddlegen` (lowercase, per PEP 8); the project is referred to as **SaddleGen** in prose.
+Package import name: `saddleflow` (lowercase, per PEP 8); the project is referred to as **SaddleFlow** in prose.
 
 ## Reference codes (`other_codes/`, git-ignored)
 
@@ -442,12 +442,12 @@ TBD — likely MIT (matching GenFlows). fairchem is MIT.
 
 - **UMA production dropouts leak into training** (fixed 2026-04-21). `uma-s-1p2` has `composition_dropout=0.10` and `mole_dropout=Dropout(p=0.05)` by default; PyTorch's recursive `.train()` activates them on the frozen backbone, creating stochastic training features vs deterministic inference features. `FlowMatchingLoss.train()` overrides `super().train()` to re-call `self.backbone.eval()`. Symptom if broken: training-loss floor that won't drop below noise, large-ish |v_pred| mismatch between training-time probe and inference-time probe.
 - **Sinusoidal time-embedding base wrong for t ∈ [0,1]** (fixed 2026-04-21). The stock base-10000 formula from Transformer positional encodings put `sin(freq·t)` at ~0 on 31 of 32 dimensions for flow-time in [0,1]. `velocity_head.sinusoidal_time_embedding` now uses geometric frequencies from 1 to `half` cycles per unit flow-time. Symptom if broken: time FiLM learns near-zero scale; velocity field almost time-invariant; the stated `time_embed_dim=64` is effectively ~4 useful dims.
-- **Evaluation RMSD over *all* atoms dilutes mobile-atom error by √N** (fixed 2026-04-20). `saddlegen.utils.eval.rmsd_pbc` / `pairwise_rmsd_pbc` / `cluster_by_rmsd` / `hungarian_match` / `evaluate_predictions` all take an optional `mobile_mask=None`. For Li/C (126 frozen C + 1 mobile Li) a 0.10 Å threshold without the mask matches anything within 1.13 Å of truth — worthless.
+- **Evaluation RMSD over *all* atoms dilutes mobile-atom error by √N** (fixed 2026-04-20). `saddleflow.utils.eval.rmsd_pbc` / `pairwise_rmsd_pbc` / `cluster_by_rmsd` / `hungarian_match` / `evaluate_predictions` all take an optional `mobile_mask=None`. For Li/C (126 frozen C + 1 mobile Li) a 0.10 Å threshold without the mask matches anything within 1.13 Å of truth — worthless.
 - **Silent CoM-projection bug** (fixed). Any system with 1 mobile atom and unconditional `v[mobile] -= v[mobile].mean()` gets its only mobile-atom velocity zeroed — no gradient, no learning, loss constant. Current code conditionals on `fixed.sum() == 0` per system; see §"Output projections".
 - **AdaLN-zero step-0 gradient unlock** (not a bug, but surprising). `VelocityHead.time_mlp`'s last layer is zero-initialised; grad on the *first* MLP layer is exactly 0 at step 0 (no path through a zero-weighted matrix). Last layer updates on step 0, which unlocks earlier layers from step 1. If you see `|∇time_mlp[0]|` = 0 only on step 0 that is expected; if it stays zero past step 1 something else is broken.
 - **LiC atom index 126 is the Li**, atoms 0–125 are the frozen C sheet. For `LiC_simpler` the Li is at index 112 (112 C atoms in the pristine cell). Easy to assume atom 0 is the mobile one and get nonsense diagnostics.
 - **Site grouping must be R∪P**, not R-only. R-only undercounts saddles per site by ~2× and looks like the data is worse than it is.
-- **UMA layout `(N, (lmax+1)², C)` vs e3nn `(N, Irreps.dim)`** are not interchangeable; all SaddleGen modules use UMA's `SO3_Linear` to avoid layout-conversion plumbing. If you add e3nn ops, you need conversion helpers.
+- **UMA layout `(N, (lmax+1)², C)` vs e3nn `(N, Irreps.dim)`** are not interchangeable; all SaddleFlow modules use UMA's `SO3_Linear` to avoid layout-conversion plumbing. If you add e3nn ops, you need conversion helpers.
 - **Negative z-component in the Li/C cell** (`-15 Å`) is intentional (vacuum direction, left-handed cell). MIC math and fairchem neighbor-list handle it; do not "fix" the sign.
 - **Isotropic Gaussian obj 2 with large σ drifts the field to radial outward** (diagnosed 2026-04-22, fixed via ice-cream-cone). Any Gaussian perturbation whose tail crosses into a neighbouring wedge creates equivariance-linked training targets that no SO(3)-equivariant model can simultaneously satisfy; SGD collapses to the C_6v-averaged radial compromise, losing the multi-attractor "flower". Ice-cream-cone sampling has finite support inside one wedge by construction and eliminates the pathology. See §"Flow formulation" for the construction; fix 13/17/19/21/22/24 history is summarised in the user-facing README.
 
@@ -509,7 +509,7 @@ When results disappoint, investigate roughly in this order — cheapest to most 
   Two fixes in increasing cost:
   - **(a) Hook layer-3 features.** Register a forward hook on `backbone.blocks[-2]` (penultimate of 4 layers) and use that captured tensor in place of `feat["node_embedding"]` everywhere we currently consume the backbone output. Layer 3's full irreps are *inputs* to layer 4's energy-producing computation, so they're heavily implicated in the autograd path and have richer l≥1 information than layer 4's outputs. Backbone stays fully frozen. **Not yet tried**; superseded operationally by (b) which we adopted instead.
   - **(b) Selectively unfreeze blocks[-1] (and optionally blocks[-2]).** `for p in backbone.blocks[-1].parameters(): p.requires_grad_(True)` plus a low LR (1e-5) on those params via a parameter-group split in the optimizer. **This is the v1+ default.** v3 also unfreezes blocks[-2]; v6 (the current production default) builds on top of that.
-- **Force injection in the head and as a FiLM in the backbone.** Compute UMA's `F = −∂E/∂x_t` via autograd through the energy block (`saddlegen.utils.forces`) and feed it (a) to the velocity head as an l=1 feature alongside Δ_P (v2), and (b) as a per-injection-point ForceFiLM inside the unfrozen UMA blocks (v6). Both gave incremental wins. Don't bother with the force-residual variant (`v_out = v_raw − α·F`) — α drifts toward zero (v4 result).
+- **Force injection in the head and as a FiLM in the backbone.** Compute UMA's `F = −∂E/∂x_t` via autograd through the energy block (`saddleflow.utils.forces`) and feed it (a) to the velocity head as an l=1 feature alongside Δ_P (v2), and (b) as a per-injection-point ForceFiLM inside the unfrozen UMA blocks (v6). Both gave incremental wins. Don't bother with the force-residual variant (`v_out = v_raw − α·F`) — α drifts toward zero (v4 result).
 - `VelocityHead.depth` 1 → 2 → 3 (`SO3_Linear` + `UMAGate` stack). Adds capacity above the frozen backbone. depth=3 is the v1+ default.
 - `GlobalAttn` depth 0 → 1 → 2 → 4, heads 8 → 16 — currently 0 by default (Mode 1 has the partner direction so distant-site mediation isn't needed); may matter on >24 Å cells with multiple mobile atoms.
 - Higher-order integrator (Euler → torchdiffeq RK45) at inference.

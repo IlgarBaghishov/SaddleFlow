@@ -33,13 +33,13 @@ lightning_logs/
 **/checkpoint_final/random_states_*.pkl
 
 # Data directories (datasets not tracked in git) anywhere in the tree,
-# with an explicit exception for saddlegen/data/ (the source package).
+# with an explicit exception for saddleflow/data/ (the source package).
 data/
-!saddlegen/data/
-!saddlegen/data/**
+!saddleflow/data/
+!saddleflow/data/**
 # Re-exclude cache/build artifacts that the negation above would otherwise un-ignore.
-saddlegen/data/**/__pycache__/
-saddlegen/data/**/*.pyc
+saddleflow/data/**/__pycache__/
+saddleflow/data/**/*.pyc
 *.lmdb
 *.h5
 *.hdf5

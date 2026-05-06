@@ -1,5 +1,5 @@
 """
-Diagnostic visualization for the Li-on-C SaddleGen example.
+Diagnostic visualization for the Li-on-C SaddleFlow example.
 
 Two figures are produced (per `--plot`):
 
@@ -36,13 +36,13 @@ from matplotlib.patches import Rectangle
 
 from fairchem.core.datasets.collaters.simple_collater import data_list_collater
 
-from saddlegen.data import (
+from saddleflow.data import (
     atoms_to_sample_dict, load_validated_triplets, mic_unwrap,
 )
-from saddlegen.flow.matching import apply_output_projections, build_atomic_data
-from saddlegen.flow.sampler import sample_saddles
-from saddlegen.models import GlobalAttn, VelocityHead
-from saddlegen.utils import (
+from saddleflow.flow.matching import apply_output_projections, build_atomic_data
+from saddleflow.flow.sampler import sample_saddles
+from saddleflow.models import GlobalAttn, VelocityHead
+from saddleflow.utils import (
     cluster_by_rmsd, group_triplets_by_site, load_ema_weights, load_uma_backbone,
 )
 
@@ -278,7 +278,7 @@ def plot_trajectories(per_site_data, c_xy, unique_sites_xy, all_saddle_xy,
                        alpha=0.85, zorder=3.5, linewidths=0)
 
     ax.legend(loc="upper right", fontsize=9, framealpha=0.95)
-    ax.set_title(f"LiC SaddleGen — trajectories from {len(per_site_data)} unique test "
+    ax.set_title(f"LiC SaddleFlow — trajectories from {len(per_site_data)} unique test "
                   f"sites × {per_site_data[0]['traj'].shape[1]} perturbations "
                   f"({n_traj_total} trajectories)"
                   + ("\n" + title_extra if title_extra else ""))

@@ -1,5 +1,5 @@
 """
-Train SaddleGen v6 (Mode 1, product-conditional flow matching) on the
+Train SaddleFlow v6 (Mode 1, product-conditional flow matching) on the
 MaterialsSaddles `mp20bat/` subset (NEB-CI saddles from Materials Project
 battery structures, ~34,742 transition states).
 
@@ -37,11 +37,11 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from data_prep import ensure_subset, load_official_splits  # noqa: E402
 
-from saddlegen.data import MaterialsSaddlesDataset
-from saddlegen.flow import FlowMatchingConfig, FlowMatchingLoss
-from saddlegen.models import EigenmodeHead, GlobalAttn, VelocityHead
-from saddlegen.models.time_filmed_backbone import TimeFiLMBackbone
-from saddlegen.utils import TrainingConfig, load_uma_backbone, train
+from saddleflow.data import MaterialsSaddlesDataset
+from saddleflow.flow import FlowMatchingConfig, FlowMatchingLoss
+from saddleflow.models import EigenmodeHead, GlobalAttn, VelocityHead
+from saddleflow.models.time_filmed_backbone import TimeFiLMBackbone
+from saddleflow.utils import TrainingConfig, load_uma_backbone, train
 
 
 def parse_args():
@@ -339,7 +339,7 @@ def main():
     force_head = None
     force_tasks = None
     if head_force_C > 0:
-        from saddlegen.utils.forces import load_uma_force_head
+        from saddleflow.utils.forces import load_uma_force_head
         force_head, force_tasks = load_uma_force_head(args.backbone, device=args.device)
         print(f"[train] inject_force=True — loaded UMA force head (frozen, eval, stress off)")
 

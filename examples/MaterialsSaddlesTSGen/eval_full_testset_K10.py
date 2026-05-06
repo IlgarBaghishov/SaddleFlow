@@ -13,7 +13,7 @@ merges, saves results.npz / cases.pkl / summary.json, and plots the histogram.
 Launch (1 node × 3 A100):
     accelerate launch --num_processes 3 --multi_gpu --mixed_precision bf16 \\
       eval_full_testset_K10.py \\
-        --ckpt-dir $SCRATCH/SaddleGen_mp20bat/runs/<RUN>/checkpoint_final \\
+        --ckpt-dir $SCRATCH/SaddleFlow_mp20bat/runs/<RUN>/checkpoint_final \\
         --K 10
 """
 
@@ -39,13 +39,13 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from data_prep import ensure_subset, load_official_splits  # noqa: E402
 
-from saddlegen.data import MaterialsSaddlesDataset  # noqa: E402
-from saddlegen.flow import FlowMatchingConfig, FlowMatchingLoss  # noqa: E402
-from saddlegen.flow.sampler import sample_saddles  # noqa: E402
-from saddlegen.models import GlobalAttn, VelocityHead  # noqa: E402
-from saddlegen.models.time_filmed_backbone import TimeFiLMBackbone  # noqa: E402
-from saddlegen.utils import load_uma_backbone  # noqa: E402
-from saddlegen.utils.eval import rmsd_pbc  # noqa: E402
+from saddleflow.data import MaterialsSaddlesDataset  # noqa: E402
+from saddleflow.flow import FlowMatchingConfig, FlowMatchingLoss  # noqa: E402
+from saddleflow.flow.sampler import sample_saddles  # noqa: E402
+from saddleflow.models import GlobalAttn, VelocityHead  # noqa: E402
+from saddleflow.models.time_filmed_backbone import TimeFiLMBackbone  # noqa: E402
+from saddleflow.utils import load_uma_backbone  # noqa: E402
+from saddleflow.utils.eval import rmsd_pbc  # noqa: E402
 
 
 def max_atom_disp_pbc(x1, x2, cell, mobile_mask=None) -> float:
@@ -70,7 +70,7 @@ def max_atom_disp_pbc(x1, x2, cell, mobile_mask=None) -> float:
         if m.any():
             norms = norms[m]
     return float(norms.max())
-from saddlegen.utils.forces import load_uma_force_head  # noqa: E402
+from saddleflow.utils.forces import load_uma_force_head  # noqa: E402
 
 
 def parse_args():
@@ -157,7 +157,7 @@ def _build_loss_module(config: dict, device: str) -> FlowMatchingLoss:
     dimer_residual_alpha_init = float(extras.get("dimer_residual_alpha_init", 0.0))
     eigenmode_head = None
     if eigenmode_aux_w > 0 or dimer_force_C > 0 or use_dimer_residual:
-        from saddlegen.models import EigenmodeHead
+        from saddleflow.models import EigenmodeHead
         eigenmode_head = EigenmodeHead(
             sphere_channels=sc, input_lmax=lmax, depth=head_depth,
             delta_endpoint_channels=delta_C,
@@ -222,7 +222,7 @@ def load_model(ckpt_dir: Path, device: str, use_ema: bool = False):
     if unexpected:
         raise RuntimeError(f"unexpected keys in checkpoint: {unexpected[:5]}")
     if use_ema:
-        from saddlegen.utils.checkpointing import load_ema_weights
+        from saddleflow.utils.checkpointing import load_ema_weights
         load_ema_weights(str(ckpt_dir), [loss_module], device, use_ema=True)
     loss_module.eval()
     return loss_module, config
@@ -378,7 +378,7 @@ def plot_histograms(npz_path: Path, out_dir: Path, K: int, n_bins: int = 100) ->
         xlabel="PBC-RMSD vs ground-truth saddle (Å)",
         title=f"TSGenerator — full test set  N={n}  K={K}",
         out_path=out_dir / f"hist_rmsd_K{K}_vs_baseline.png",
-        label_p=f"SaddleGen K={K}  mean={rmsd_p.mean():.4f}, med={np.median(rmsd_p):.4f}",
+        label_p=f"SaddleFlow K={K}  mean={rmsd_p.mean():.4f}, med={np.median(rmsd_p):.4f}",
         label_b=f"(R+P)/2  mean={rmsd_b.mean():.4f}, med={np.median(rmsd_b):.4f}",
     )
 
@@ -400,7 +400,7 @@ def plot_histograms(npz_path: Path, out_dir: Path, K: int, n_bins: int = 100) ->
             xlabel="Max atom displacement (PBC, L∞ over atoms) vs truth (Å)",
             title=f"TSGenerator — full test set  N={n}  K={K}  (max-atom-disp)",
             out_path=out_dir / f"hist_maxdisp_K{K}_vs_baseline.png",
-            label_p=f"SaddleGen K={K}  mean={maxd_p.mean():.4f}, med={np.median(maxd_p):.4f}",
+            label_p=f"SaddleFlow K={K}  mean={maxd_p.mean():.4f}, med={np.median(maxd_p):.4f}",
             label_b=f"(R+P)/2  mean={maxd_b.mean():.4f}, med={np.median(maxd_b):.4f}",
         )
 

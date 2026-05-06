@@ -40,12 +40,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 
-from saddlegen.data import (
+from saddleflow.data import (
     atoms_to_sample_dict, load_validated_triplets, mic_unwrap,
 )
-from saddlegen.flow.sampler import sample_saddles
-from saddlegen.models import GlobalAttn, VelocityHead
-from saddlegen.utils import (
+from saddleflow.flow.sampler import sample_saddles
+from saddleflow.models import GlobalAttn, VelocityHead
+from saddleflow.utils import (
     group_triplets_by_site, load_ema_weights, load_uma_backbone,
 )
 

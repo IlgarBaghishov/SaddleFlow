@@ -1,9 +1,9 @@
 """
-Train SaddleGen on the Li-on-C defective-graphene test case.
+Train SaddleFlow on the Li-on-C defective-graphene test case.
 
 Data: `train_set.traj` with flat `[R1, S1, P1, R2, S2, P2, …]` ordering (no
 `side` info required — `validate_triplet` falls back to positional ordering).
-All reusable machinery lives in `saddlegen`; this script is only argparse +
+All reusable machinery lives in `saddleflow`; this script is only argparse +
 wiring.
 
 Sampling: ice-cream-cone of x_0 around the r_R → r_S axis. The per-sample
@@ -21,11 +21,11 @@ from pathlib import Path
 
 import torch
 
-from saddlegen.data import TrajTripletDataset
-from saddlegen.flow import FlowMatchingConfig, FlowMatchingLoss
-from saddlegen.models import GlobalAttn, VelocityHead
-from saddlegen.models.time_filmed_backbone import TimeFiLMBackbone
-from saddlegen.utils import TrainingConfig, load_uma_backbone, train
+from saddleflow.data import TrajTripletDataset
+from saddleflow.flow import FlowMatchingConfig, FlowMatchingLoss
+from saddleflow.models import GlobalAttn, VelocityHead
+from saddleflow.models.time_filmed_backbone import TimeFiLMBackbone
+from saddleflow.utils import TrainingConfig, load_uma_backbone, train
 
 
 def parse_args():
@@ -188,7 +188,7 @@ def main():
     force_head = None
     force_tasks = None
     if head_force_C > 0:
-        from saddlegen.utils.forces import load_uma_force_head
+        from saddleflow.utils.forces import load_uma_force_head
         force_head, force_tasks = load_uma_force_head("uma-s-1p2", device=args.device)
         print(f"[train] inject_force=True — loaded UMA force head (frozen, eval, stress off)")
 

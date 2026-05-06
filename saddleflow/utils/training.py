@@ -1,5 +1,5 @@
 """
-HuggingFace-`accelerate`-based training loop for SaddleGen.
+HuggingFace-`accelerate`-based training loop for SaddleFlow.
 
 Thin on purpose: AdamW + linear-warmup-then-cosine LR schedule + EMA + grad-clip
 + checkpointing. No Hydra, no Lightning, no TorchTNT — CLAUDE.md §"Training

@@ -36,7 +36,7 @@ top-level `CLAUDE.md` for ablation history.
 ## Layout on disk
 
 ```
-$SCRATCH/SaddleGen_mp20bat/                                  ← run root (override with $SADDLEGEN_RUN_ROOT)
+$SCRATCH/SaddleFlow_mp20bat/                                  ← run root (override with $SADDLEFLOW_RUN_ROOT)
 └── runs/tsgen_<TIMESTAMP>/
     ├── config.json
     ├── dataset_stats.json
@@ -74,9 +74,9 @@ Optional overrides used by `run.sh`:
 
 | Var | Default | Purpose |
 |---|---|---|
-| `SADDLEGEN_PYTHON` | `python` | which python on `$PATH` |
-| `SADDLEGEN_REPO` | `<script>/../..` | root of the SaddleFlow repo |
-| `SADDLEGEN_RUN_ROOT` | `$SCRATCH/SaddleGen_mp20bat` | where `runs/` is created |
+| `SADDLEFLOW_PYTHON` | `python` | which python on `$PATH` |
+| `SADDLEFLOW_REPO` | `<script>/../..` | root of the SaddleFlow repo |
+| `SADDLEFLOW_RUN_ROOT` | `$SCRATCH/SaddleFlow_mp20bat` | where `runs/` is created |
 
 ### 1. Smoke test (single-node allocation)
 
@@ -93,12 +93,12 @@ Edit `#SBATCH -A _replace_me_` to your cluster allocation, then submit *from
 your scratch root* so the SLURM logs land there too:
 
 ```bash
-cd $SCRATCH/SaddleGen_mp20bat
+cd $SCRATCH/SaddleFlow_mp20bat
 sbatch $WORK/codes/SaddleFlow/examples/MaterialsSaddlesTSGen/run.sh
 ```
 
 Everything heavy (checkpoints, EMA, optimizer state, dataset shards, eval npz,
-`.traj` files) is written under `$SCRATCH/SaddleGen_mp20bat/` — `$WORK` only
+`.traj` files) is written under `$SCRATCH/SaddleFlow_mp20bat/` — `$WORK` only
 holds the source code.
 
 Expected runtime on 4 × A100: ~30 h for 60 epochs.
@@ -106,7 +106,7 @@ Expected runtime on 4 × A100: ~30 h for 60 epochs.
 ### 3. Post-training analyses (the paper figures)
 
 ```bash
-RUN=$SCRATCH/SaddleGen_mp20bat/runs/tsgen_<TIMESTAMP>
+RUN=$SCRATCH/SaddleFlow_mp20bat/runs/tsgen_<TIMESTAMP>
 
 # Full test set at K=10 (deterministic Euler, ~30 min on 3 GPUs)
 accelerate launch --num_processes 3 --multi_gpu --mixed_precision bf16 \
@@ -129,7 +129,7 @@ Per-epoch checkpoints land at `<output-dir>/checkpoint_epoch_NNNNN`. If SLURM
 times out or a node dies:
 
 ```bash
-RESUME_FROM=$SCRATCH/SaddleGen_mp20bat/runs/tsgen_PREV/checkpoint_epoch_42 \
+RESUME_FROM=$SCRATCH/SaddleFlow_mp20bat/runs/tsgen_PREV/checkpoint_epoch_42 \
     sbatch run.sh
 ```
 

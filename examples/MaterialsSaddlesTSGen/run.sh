@@ -6,7 +6,7 @@
 #SBATCH -o logs/slurm_%j.out
 #SBATCH -e logs/slurm_%j.err
 #SBATCH -A _replace_me_
-#SBATCH -J saddlegen_tsgen
+#SBATCH -J saddleflow_tsgen
 
 # Mode-1 product-conditional flow matching, full UMA-S-1.2 unfreeze, 4-block
 # time-FiLM, hybrid PBC-correct convergent v_target with σ=0.05 Å perturb,
@@ -18,35 +18,35 @@
 # ---- Required environment overrides ----
 #   $SCRATCH                 — fast scratch root (TACC sets automatically)
 #   $WORK                    — long-term project directory (TACC ditto)
-#   SADDLEGEN_PYTHON         — python interpreter (default: `python` on $PATH)
-#   SADDLEGEN_RUN_ROOT       — where runs/ subdir lives
-#                              default: $SCRATCH/SaddleGen_mp20bat
-#   SADDLEGEN_REPO           — root of the SaddleFlow repo
+#   SADDLEFLOW_PYTHON         — python interpreter (default: `python` on $PATH)
+#   SADDLEFLOW_RUN_ROOT       — where runs/ subdir lives
+#                              default: $SCRATCH/SaddleFlow_mp20bat
+#   SADDLEFLOW_REPO           — root of the SaddleFlow repo
 #                              default: $(realpath script_dir/../..)
 #   #SBATCH -A               — REPLACE `_replace_me_` with your TACC allocation
 #
 # Submission:
-#   cd $SCRATCH/SaddleGen_mp20bat && sbatch /path/to/run.sh
+#   cd $SCRATCH/SaddleFlow_mp20bat && sbatch /path/to/run.sh
 #   (cd-ing first ensures SLURM stderr/stdout land in $SCRATCH/.../logs/.)
 #
 # Smoke test (inside an existing allocation):
 #   SMOKE=1 bash run.sh                 # 1 epoch × 4 triplets × 2 eval cases
 #
 # Resume an interrupted training:
-#   RESUME_FROM=$SCRATCH/SaddleGen_mp20bat/runs/PREV/checkpoint_epoch_NN \
+#   RESUME_FROM=$SCRATCH/SaddleFlow_mp20bat/runs/PREV/checkpoint_epoch_NN \
 #       sbatch run.sh
 
 set -euo pipefail
 
 # Locate the script and the repo it lives in (script_dir/../../).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO="${SADDLEGEN_REPO:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
-RUN_ROOT="${SADDLEGEN_RUN_ROOT:-${SCRATCH:?\$SCRATCH is not set}/SaddleGen_mp20bat}"
+REPO="${SADDLEFLOW_REPO:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+RUN_ROOT="${SADDLEFLOW_RUN_ROOT:-${SCRATCH:?\$SCRATCH is not set}/SaddleFlow_mp20bat}"
 OUT_DIR="$RUN_ROOT/runs/tsgen_$(date +%Y%m%d_%H%M%S)"
-PYTHON="${SADDLEGEN_PYTHON:-python}"
+PYTHON="${SADDLEFLOW_PYTHON:-python}"
 
 # SLURM `#SBATCH -o logs/slurm_%j.out` is relative to the submission cwd.
-# Submit with `cd $SADDLEGEN_RUN_ROOT && sbatch /path/to/run.sh` so logs land
+# Submit with `cd $SADDLEFLOW_RUN_ROOT && sbatch /path/to/run.sh` so logs land
 # on scratch — never on $WORK (which has tighter quotas on TACC).
 mkdir -p "$OUT_DIR" "$RUN_ROOT/logs"
 cd "$RUN_ROOT"
@@ -144,7 +144,7 @@ echo "[run] Training finished at $(date). Checkpoint: $OUT_DIR/checkpoint_final"
 echo "[run] Running ${EVAL_NUM_CASES}-case sample_and_distance_eval on 1 node × 3 GPUs..."
 
 # Tell the eval script where data_prep.py lives (it inserts this on sys.path).
-export SADDLEGEN_RUN_DIR=$SCRIPT_DIR
+export SADDLEFLOW_RUN_DIR=$SCRIPT_DIR
 
 srun --nodes=1 --ntasks=1 --ntasks-per-node=1 \
   bash -c "

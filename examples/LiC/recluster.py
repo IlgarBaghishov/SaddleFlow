@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-from saddlegen.utils import cluster_by_rmsd, hungarian_match
+from saddleflow.utils import cluster_by_rmsd, hungarian_match
 
 
 def parse_args():

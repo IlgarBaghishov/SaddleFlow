@@ -40,11 +40,11 @@ from matplotlib.patches import Rectangle
 
 from fairchem.core.datasets.collaters.simple_collater import data_list_collater
 
-from saddlegen.data import load_validated_triplets, mic_unwrap
-from saddlegen.data.transforms import mic_displacement, wrap_positions
-from saddlegen.flow.matching import apply_output_projections, build_atomic_data
-from saddlegen.models import GlobalAttn, VelocityHead
-from saddlegen.utils import load_ema_weights, load_uma_backbone
+from saddleflow.data import load_validated_triplets, mic_unwrap
+from saddleflow.data.transforms import mic_displacement, wrap_positions
+from saddleflow.flow.matching import apply_output_projections, build_atomic_data
+from saddleflow.models import GlobalAttn, VelocityHead
+from saddleflow.utils import load_ema_weights, load_uma_backbone
 
 
 LI_INDEX = 126
@@ -105,7 +105,7 @@ def architecture_from_config(run_dir: Path):
 
 def build_model(arch, device):
     """Reconstruct the architecture used at training time. Handles v0, v1, v2, v3."""
-    from saddlegen.models.time_filmed_backbone import TimeFiLMBackbone
+    from saddleflow.models.time_filmed_backbone import TimeFiLMBackbone
     raw_backbone = load_uma_backbone(
         "uma-s-1p2", device=device, freeze=True, eval_mode=True,
         unfreeze_last_block=arch["unfreeze_uma_last"],
@@ -258,7 +258,7 @@ def batched_euler(starts, partners, *, Z, cell, task_name, charge, spin, fixed,
             )                                          # (chunk, N, 3)
             delta_all = delta_each.reshape(-1, 3)
 
-            from saddlegen.models.time_filmed_backbone import TimeFiLMBackbone
+            from saddleflow.models.time_filmed_backbone import TimeFiLMBackbone
             t_tensor = torch.full((chunk,), t_scalar, dtype=torch.float32, device=device)
 
             is_v6_force_film = (
@@ -274,7 +274,7 @@ def batched_euler(starts, partners, *, Z, cell, task_name, charge, spin, fixed,
                         feat = backbone(batch_data, t_tensor, batch_idx, force=None)
                     else:
                         feat = backbone(batch_data)
-                    from saddlegen.utils.forces import compute_uma_forces
+                    from saddleflow.utils.forces import compute_uma_forces
                     force_all = compute_uma_forces(
                         batch_data, feat, force_head, force_tasks,
                         create_graph=False, task_name=task_name,
@@ -421,7 +421,7 @@ def main():
     force_head = None
     force_tasks = None
     if arch.get("force_field_channels", 0) > 0:
-        from saddlegen.utils.forces import load_uma_force_head
+        from saddleflow.utils.forces import load_uma_force_head
         force_head, force_tasks = load_uma_force_head("uma-s-1p2", device=device)
         print(f"[viz/all] force injection ON — loaded UMA force head")
 

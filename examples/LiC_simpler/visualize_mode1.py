@@ -35,10 +35,10 @@ from matplotlib.patches import Rectangle
 
 from ase.io import Trajectory
 
-from saddlegen.data import atoms_to_sample_dict, mic_unwrap
-from saddlegen.flow.sampler import sample_saddles
-from saddlegen.models import GlobalAttn, VelocityHead
-from saddlegen.utils import load_ema_weights, load_uma_backbone
+from saddleflow.data import atoms_to_sample_dict, mic_unwrap
+from saddleflow.flow.sampler import sample_saddles
+from saddleflow.models import GlobalAttn, VelocityHead
+from saddleflow.utils import load_ema_weights, load_uma_backbone
 
 
 # Atom layout for the LiC_simpler case (see CLAUDE.md latent-bug log).
