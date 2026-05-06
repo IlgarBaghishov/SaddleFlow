@@ -18,15 +18,15 @@ JointGrid-style plots (parity scatter + marginal histograms), one linear-axis
 and one log-axis. Reuses `saddlegen.utils.eval.rmsd_pbc` for the metric and
 `saddlegen.flow.sampler.sample_saddles` for inference.
 
-Launch (1 node × 3 A100 on Lonestar6):
+Launch (1 node × 3 A100):
     accelerate launch --num_processes 3 --multi_gpu --mixed_precision bf16 \\
       examples/MaterialsSaddles/sample_and_distance_eval.py \\
-        --ckpt-dir /scratch/.../runs/v6_.../checkpoint_final \\
+        --ckpt-dir $SCRATCH/.../runs/.../checkpoint_final \\
         --num-cases 50
 
 Single-GPU (smoke test):
     python examples/MaterialsSaddles/sample_and_distance_eval.py \\
-        --ckpt-dir /scratch/.../runs/v6_.../checkpoint_final \\
+        --ckpt-dir $SCRATCH/.../runs/.../checkpoint_final \\
         --num-cases 3
 """
 
@@ -52,9 +52,10 @@ import matplotlib.pyplot as plt
 
 # Reach the on-scratch data_prep module (official-split loader). Only used to
 # resolve the shards directory + read the train/val/test parquet splits.
-# Override via env var so the same script works for v7_0 / v7_2a / v7_2a1a / v7_2b.
+# Override via SADDLEGEN_RUN_DIR; otherwise the bundled examples copy is used.
 RUN_DIR_DEFAULT = os.environ.get(
-    "SADDLEGEN_RUN_DIR", "/scratch/08405/ilgar/SaddleGen_mp20bat/v7_0",
+    "SADDLEGEN_RUN_DIR",
+    str(Path(__file__).resolve().parents[1] / "MaterialsSaddlesTSGen"),
 )
 sys.path.insert(0, RUN_DIR_DEFAULT)
 from data_prep import ensure_subset, load_official_splits  # noqa: E402

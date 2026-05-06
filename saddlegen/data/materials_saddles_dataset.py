@@ -1,6 +1,6 @@
 """
 Adapter for the MaterialsSaddles release format (HuggingFace dataset
-`SciLM-ai/MaterialsSaddles`).
+`AnonymouScientist/MaterialsSaddles`).
 
 Each .aselmdb shard stores rows as flat triplets `[R, S, P, R, S, P, ...]`,
 with rich per-row metadata in `row.data['info']` and `task_name` set per row.
