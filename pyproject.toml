@@ -26,6 +26,7 @@ dependencies = [
     "pyyaml",
     "wandb",
     "matplotlib>=3.7",
+    "pyarrow",  # data_prep.py reads MaterialsSaddles official-split parquet files
 ]
 
 [project.optional-dependencies]

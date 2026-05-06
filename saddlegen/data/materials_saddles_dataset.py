@@ -337,7 +337,12 @@ class MaterialsSaddlesDataset(Dataset):
             R, S, P, triplet_id,
             self.default_task_name, self.default_charge, self.default_spin,
         )[side]
-        return {
+        # v7-2a1a: expose eigenmode (saddle's negative-curvature direction) as a
+        # top-level key, when the dataset row carries it. NEB ('mp20bat') and
+        # Dimer (lemat / oc20 / oc22) saddles both ship `info['eigenmode']` per
+        # the dataset README — an (N, 3) array, generally normalized to unit
+        # length, defined up to global sign. Frozen atoms have eigenmode = 0.
+        sample_dict = {
             "start_pos": torch.from_numpy(r["start_pos"]),
             "saddle_un_pos": torch.from_numpy(r["saddle_un_pos"]),
             "partner_un_pos": torch.from_numpy(r["partner_un_pos"]),
@@ -352,6 +357,10 @@ class MaterialsSaddlesDataset(Dataset):
             "triplet_id": r["triplet_id"],
             "metadata": r["metadata"],
         }
+        eig = r["metadata"].get("saddle_info", {}).get("eigenmode")
+        if eig is not None:
+            sample_dict["eigenmode"] = torch.as_tensor(np.asarray(eig), dtype=torch.float32)
+        return sample_dict
 
     def compute_stats(self, stats_cache: str | None = None,
                       sample: int | None = None) -> dict:

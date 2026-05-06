@@ -167,10 +167,11 @@ class TimeFiLMBackbone(nn.Module):
         force_film = self.force_films[film_idx] if self.inject_force else None
         def hook(module, args, kwargs):
             if self._t is None or self._batch_idx is None:
-                raise RuntimeError(
-                    "TimeFiLMBackbone forward state not initialised — pre-hook "
-                    "fired without `forward()` having stashed t/batch_idx."
-                )
+                # v7-2b static-featurisation mode: caller invoked
+                # `forward_static(data)` to encode a time-free reference
+                # geometry (R or P). Skip both FiLMs by returning None — the
+                # block then receives `args` and `kwargs` unchanged.
+                return None
             x_message = args[0]
             x_filmed = film(x_message, self._t, self._batch_idx)
             # Force-FiLM is conditionally applied: skip when self._force is None,
@@ -213,3 +214,87 @@ class TimeFiLMBackbone(nn.Module):
             self._t = None
             self._batch_idx = None
             self._force = None
+
+    def forward_static(self, data) -> dict:
+        """v7-2b: run the underlying UMA backbone WITHOUT time-FiLM and WITHOUT
+        force-FiLM. Used to encode a fixed reference geometry (R or P) that
+        carries no notion of time and no on-the-fly forces. The pre-hooks
+        attached to UMA's blocks see `_t = _batch_idx = _force = None` and
+        pass their inputs through unchanged.
+        """
+        self._t = None
+        self._batch_idx = None
+        self._force = None
+        return self.backbone(data)
+
+
+class MultiLayerCapture:
+    """v7-5: post-forward hooks on a list of UMA `eSCNMD_Block` modules that
+    stash each block's output tensor for later concat into a multi-layer
+    feature stack.
+
+    Each block returns a single (N, num_sph, sphere_channels) tensor (verified
+    against fairchem 2.19's `eSCNMD_Block.forward`). The hook stores it in
+    `_captures[block_idx]`. Hooks DO NOT change MoLE state ordering — they
+    only read what the block produced. Order of forwards still matters for
+    backward recompute under gradient checkpointing; this helper is just a
+    side-channel to grab activations the underlying graph would otherwise
+    discard before the head sees them.
+
+    Usage with a SINGLE backbone forward:
+        cap = MultiLayerCapture(uma.blocks, indices=[0, 1, 2, 3])
+        feat = uma(data)             # captures populate as side effect
+        x_multi = cap.cat()          # (N, num_sph, 4*sphere_channels)
+        cap.clear()                  # before next forward to free refs
+
+    Usage with MULTIPLE forwards on the same backbone (e.g. R then P):
+        cap = MultiLayerCapture(frozen_uma.blocks, indices=[0, 1, 2])
+        cap.clear(); frozen_uma(R_data); R_multi = cap.cat()
+        cap.clear(); frozen_uma(P_data); P_multi = cap.cat()
+        cap.clear()
+    """
+
+    def __init__(self, blocks, indices: list[int]):
+        n = len(blocks)
+        self.indices = [(i if i >= 0 else n + i) for i in indices]
+        if any(i < 0 or i >= n for i in self.indices):
+            raise ValueError(
+                f"MultiLayerCapture indices out of range for {n} blocks: {indices}"
+            )
+        self._captures: dict[int, torch.Tensor] = {}
+        self._handles = []
+        for i in self.indices:
+            block = blocks[i]
+            handle = block.register_forward_hook(self._make_hook(i))
+            self._handles.append(handle)
+
+    def _make_hook(self, block_idx: int):
+        def hook(module, inputs, output):
+            # eSCNMD_Block.forward returns a plain tensor (verified). Store the
+            # autograd-connected reference; do not detach — the trainable
+            # backbone needs gradients to flow back through these for v7-5.
+            self._captures[block_idx] = output
+        return hook
+
+    def clear(self) -> None:
+        self._captures = {}
+
+    def cat(self) -> torch.Tensor:
+        """Concatenate captured outputs along the channel axis, in the order
+        of `self.indices` (lowest first). Result shape:
+            (N, num_sph, len(indices) * sphere_channels)
+        """
+        if len(self._captures) != len(self.indices):
+            raise RuntimeError(
+                f"MultiLayerCapture: have {len(self._captures)} captures but "
+                f"expected {len(self.indices)} (indices={self.indices}). Did "
+                "the backbone forward run, or were captures cleared early?"
+            )
+        return torch.cat([self._captures[i] for i in self.indices], dim=-1)
+
+    def remove(self) -> None:
+        """Detach all hooks. Call before discarding the helper to avoid leaks."""
+        for h in self._handles:
+            h.remove()
+        self._handles = []
+        self._captures = {}

@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pickle
 import random
 import sys
@@ -51,7 +52,10 @@ import matplotlib.pyplot as plt
 
 # Reach the on-scratch data_prep module (official-split loader). Only used to
 # resolve the shards directory + read the train/val/test parquet splits.
-RUN_DIR_DEFAULT = "/scratch/08405/ilgar/SaddleGen_mp20bat"
+# Override via env var so the same script works for v7_0 / v7_2a / v7_2a1a / v7_2b.
+RUN_DIR_DEFAULT = os.environ.get(
+    "SADDLEGEN_RUN_DIR", "/scratch/08405/ilgar/SaddleGen_mp20bat/v7_0",
+)
 sys.path.insert(0, RUN_DIR_DEFAULT)
 from data_prep import ensure_subset, load_official_splits  # noqa: E402
 
@@ -125,6 +129,13 @@ def parse_args():
                         "(default: <ckpt-dir>/sample_distance_eval)")
     p.add_argument("--shards-dir", default=None,
                    help="override $SCRATCH/MaterialsSaddles/<subset> location")
+    # Eval-with-EMA: by default we eval the live point-estimate weights from
+    # model.safetensors. Set --use-ema to overlay the EMA shadow from ema.pt
+    # in the same checkpoint dir. Useful for picking an earlier checkpoint
+    # whose EMA at val minimum was lower than the final live weights.
+    p.add_argument("--use-ema", action="store_true",
+                   help="overlay EMA shadow weights from <ckpt-dir>/ema.pt "
+                        "after loading model.safetensors (default: live weights)")
     return p.parse_args()
 
 
@@ -145,7 +156,9 @@ def _build_loss_module(config: dict, device: str) -> FlowMatchingLoss:
     backbone_name = extras.get("backbone", "uma-s-1p2")
     inject_str = extras.get("early_time_film_blocks", "-2,-1")
     inject_blocks = [int(s) for s in inject_str.split(",")]
-    inject_force = bool(extras.get("inject_force", True))
+    # NB: train.py writes the key as "force_film" (matching the CLI flag name),
+    # not "inject_force". Read both for backward-compat with older configs.
+    inject_force = bool(extras.get("force_film", extras.get("inject_force", True)))
     unfreeze_last = bool(extras.get("unfreeze_uma_last", True))
     unfreeze_last2 = bool(extras.get("unfreeze_uma_last2", True))
     attn_layers = int(extras.get("attn_layers", 0))
@@ -165,6 +178,12 @@ def _build_loss_module(config: dict, device: str) -> FlowMatchingLoss:
     if unfreeze_last2:
         for p in raw_backbone.blocks[-2].parameters():
             p.requires_grad_(True)
+    # v7-5: full unfreeze (saved-checkpoint architecture must match arch we
+    # build here, so unfreeze whatever the trained run unfroze).
+    if bool(extras.get("unfreeze_uma_all", False)):
+        for bi in range(len(raw_backbone.blocks)):
+            for p in raw_backbone.blocks[bi].parameters():
+                p.requires_grad_(True)
     sc, lmax = raw_backbone.sphere_channels, raw_backbone.lmax
 
     backbone = TimeFiLMBackbone(
@@ -174,26 +193,105 @@ def _build_loss_module(config: dict, device: str) -> FlowMatchingLoss:
         sphere_channels=sc, lmax=lmax,
         num_heads=attn_heads, num_layers=attn_layers,
     ).to(device)
+    # v7-2b / v7-3: pick up endpoint_features and dimer_force flags from the
+    # run's saved config so the head and FlowMatchingLoss are built identically
+    # to training.
+    endpoint_features_enabled = bool(extras.get("endpoint_features", True))
+    dimer_force_C = int(extras.get("dimer_force_channels", 0))
+    eigenmode_aux_w = float(extras.get("eigenmode_aux_weight", 0.0))
+    # v7-5: read multi-layer factors from extras (default 1 = v7-4 behaviour).
+    x_input_factor = int(extras.get("x_input_channel_factor", 1))
+    n_ep_layers = int(extras.get("endpoint_n_layers_per_side", 1))
     head = VelocityHead(
         sphere_channels=sc, input_lmax=lmax, depth=head_depth,
         delta_endpoint_channels=delta_C,
         force_field_channels=force_C,
         force_residual=force_residual,
+        endpoint_features_enabled=endpoint_features_enabled,
+        dimer_force_channels=dimer_force_C,
+        x_input_channel_factor=x_input_factor,
+        endpoint_n_layers_per_side=n_ep_layers,
     ).to(device)
-    force_head, force_tasks = load_uma_force_head(backbone_name, device=device)
+    # Load UMA force head only when the trained model used force injection.
+    # When force_field_channels=0 (e.g. v7_6_2a), the head was built without
+    # force_proj/fuse, so passing a force_head into FlowMatchingLoss would
+    # trigger its iff-validator. Frozen-UMA copy and dimer pathway are also
+    # auto-disabled downstream when force_C=0.
+    if force_C > 0:
+        force_head, force_tasks = load_uma_force_head(backbone_name, device=device)
+    else:
+        force_head, force_tasks = None, None
 
+    # v7-3: when the trained checkpoint includes an eigenmode head (because it
+    # was used to drive F_dimer), construct it here too so its weights load and
+    # it can be passed to `sample_saddles`.
+    use_dimer_residual = bool(extras.get("use_dimer_residual", False))
+    dimer_residual_alpha_init = float(extras.get("dimer_residual_alpha_init", 0.0))
+    eigenmode_head = None
+    if eigenmode_aux_w > 0 or dimer_force_C > 0 or use_dimer_residual:
+        from saddlegen.models import EigenmodeHead
+        # v7-4-redesign: EigenmodeHead is a VelocityHead subclass and is
+        # constructed with the same architecture args. Mirror what the
+        # training run did so the saved weights load cleanly.
+        eigenmode_head = EigenmodeHead(
+            sphere_channels=sc, input_lmax=lmax, depth=head_depth,
+            delta_endpoint_channels=delta_C,
+            force_field_channels=force_C,
+            force_residual=False,
+            endpoint_features_enabled=endpoint_features_enabled,
+            dimer_force_channels=0,
+            x_input_channel_factor=x_input_factor,
+            endpoint_n_layers_per_side=n_ep_layers,
+        ).to(device)
+
+    # v7-4-redesign: a SECOND, fully-frozen UMA backbone for force computation
+    # — built ONLY when the training run used it (recorded in extras).
+    frozen_force_backbone = None
+    if bool(extras.get("frozen_force_backbone", False)):
+        frozen_force_backbone = load_uma_backbone(
+            backbone_name, device=device, freeze=True, eval_mode=True,
+            unfreeze_last_block=False,
+        )
+        for p in frozen_force_backbone.parameters():
+            p.requires_grad_(False)
+        frozen_force_backbone.eval()
+
+    # v7-5: parse multi-layer index lists from extras (empty string = v7-4).
+    multi_layer_xt_str = str(extras.get("multi_layer_xt", ""))
+    multi_layer_endpoint_str = str(extras.get("multi_layer_endpoint", ""))
+    multi_layer_xt = (
+        [int(s) for s in multi_layer_xt_str.split(",")] if multi_layer_xt_str else None
+    )
+    multi_layer_endpoint = (
+        [int(s) for s in multi_layer_endpoint_str.split(",")]
+        if multi_layer_endpoint_str else None
+    )
+    com_symmetric_loss = bool(extras.get("com_symmetric_loss", False))
     loss_module = FlowMatchingLoss(
-        FlowMatchingConfig(mode=mode, alpha=alpha, R_max_abs=R_max, xt_perturb_sigma=0.0),
+        FlowMatchingConfig(
+            mode=mode, alpha=alpha, R_max_abs=R_max, xt_perturb_sigma=0.0,
+            com_symmetric_loss=com_symmetric_loss,
+        ),
         backbone, attn, head,
         force_head=force_head, force_tasks=force_tasks,
+        eigenmode_head=eigenmode_head,
+        eigenmode_loss_weight=eigenmode_aux_w,
+        frozen_force_backbone=frozen_force_backbone,
+        use_dimer_residual=use_dimer_residual,
+        dimer_residual_alpha_init=dimer_residual_alpha_init,
+        multi_layer_xt_indices=multi_layer_xt,
+        multi_layer_endpoint_indices=multi_layer_endpoint,
     )
     return loss_module
 
 
-def load_model(ckpt_dir: Path, device: str):
-    """Build the architecture from config.json and load LIVE weights from
-    model.safetensors (non-EMA — train log showed live > EMA on val/test for
-    this run; EMA was -0.002 worse on val and -0.0023 worse on test).
+def load_model(ckpt_dir: Path, device: str, use_ema: bool = False):
+    """Build the architecture from config.json and load weights.
+
+    Default loads LIVE weights from `model.safetensors` (point-estimate at the
+    end of the saved epoch). With `use_ema=True`, additionally overlays the
+    EMA shadow from `ema.pt` in the same checkpoint dir — useful when the
+    EMA had a lower val loss than the live weights at this checkpoint.
     """
     cfg_path = ckpt_dir.parent / "config.json"
     if not cfg_path.is_file():
@@ -216,6 +314,10 @@ def load_model(ckpt_dir: Path, device: str):
         # Unexpected keys mean the architecture diverged from what was saved —
         # fail loud rather than silently using random weights.
         raise RuntimeError(f"unexpected keys in checkpoint: {unexpected[:5]}")
+    if use_ema:
+        from saddlegen.utils.checkpointing import load_ema_weights
+        load_ema_weights(str(ckpt_dir), [loss_module], device, use_ema=True)
+        print(f"[load] overlaid EMA shadow from {ckpt_dir}/ema.pt")
     loss_module.eval()
     return loss_module, config
 
@@ -261,6 +363,15 @@ def run_one_case(record: dict, loss_module: FlowMatchingLoss, *, K: int,
         partner_pos=partner_un,
         force_head=loss_module.force_head,
         force_tasks=loss_module.force_tasks,
+        eigenmode_head=loss_module.eigenmode_head,    # drives F_dimer
+        frozen_force_backbone=loss_module.frozen_force_backbone,    # v7-3 onwards
+        dimer_residual_alpha_mlp=(                                  # v7-4: per-atom α MLP
+            loss_module.dimer_residual_alpha_mlp if loss_module.use_dimer_residual else None
+        ),
+        # v7-5: pass through multi-layer captures so inference uses the same
+        # block stacks the training forward built. None when checkpoint is v7-4.
+        xt_capture=loss_module._xt_capture,
+        endpoint_capture=loss_module._endpoint_capture,
     )  # (1, N, 3)
     pred_np = pred[0].detach().cpu().numpy().astype(np.float64)
 
@@ -472,7 +583,7 @@ def main():
     # Load model (every rank — small enough to fit per-GPU).
     if state.is_main_process:
         print(f"[main] loading model on every rank …")
-    loss_module, _config = load_model(ckpt_dir, device)
+    loss_module, _config = load_model(ckpt_dir, device, use_ema=args.use_ema)
 
     # Shard cases: rank r processes case_idx ≡ r (mod world).
     my_indices = list(range(args.num_cases))[state.process_index::state.num_processes]

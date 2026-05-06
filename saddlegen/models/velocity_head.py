@@ -138,26 +138,75 @@ class VelocityHead(nn.Module):
         delta_endpoint_channels: int = 0,
         force_field_channels: int = 0,
         force_residual: bool = False,
+        endpoint_features_enabled: bool = False,
+        dimer_force_channels: int = 0,
+        x_input_channel_factor: int = 1,
+        endpoint_n_layers_per_side: int = 1,
     ):
         super().__init__()
         assert depth >= 1
         assert input_lmax >= 1, "VelocityHead needs l=1 channels to emit (N, 3)"
         assert delta_endpoint_channels >= 0
         assert force_field_channels >= 0
+        assert x_input_channel_factor >= 1
+        assert endpoint_n_layers_per_side >= 1
         self.sphere_channels = sphere_channels
         self.input_lmax = input_lmax
         self.depth = depth
         self.time_embed_dim = time_embed_dim
         self.delta_endpoint_channels = delta_endpoint_channels
         self.force_field_channels = force_field_channels
+        # v7-5: when the caller passes a multi-layer concat of trainable-UMA
+        # block outputs (X_T features), `x_input_channel_factor` says how many
+        # blocks were stacked. Head then projects (N, num_sph, factor*C)
+        # → (N, num_sph, C) via an SO3_Linear before any inject path. The
+        # rest of the pipeline (delta/force/dimer/endpoint inject, time-FiLM,
+        # depth-3 trunk, final SO3_Linear) operates on the projected
+        # sphere_channels=C features as in v7-4 — only the input gate widens.
+        # factor=1 (default) preserves v7-4 behaviour exactly: no input_proj
+        # is constructed, the head consumes (N, num_sph, C) as before.
+        self.x_input_channel_factor = int(x_input_channel_factor)
+        if self.x_input_channel_factor > 1:
+            self.input_proj = SO3_Linear(
+                self.x_input_channel_factor * sphere_channels,
+                sphere_channels,
+                lmax=input_lmax,
+            )
+        # v7-2b: when True, the head accepts per-atom UMA-encoded features for
+        # R and P (each with `sphere_channels` channels, num_sph slots) and
+        # additively injects an SO3_Linear projection of [R_feats, P_feats]
+        # into the trunk before the final output. Zero-init so the head's
+        # behaviour at init is identical to the v7-2a head.
+        # v7-5: when `endpoint_n_layers_per_side > 1`, the caller stacks each
+        # endpoint's features over multiple frozen-UMA blocks (e.g. blocks
+        # [0..2] for v7-5) and concats both sides → (N, num_sph,
+        # 2 * n_layers * sphere_channels). The endpoint projection grows
+        # accordingly and stays zero-init so v7-5 is initially v7-2b-equivalent
+        # (endpoint contribution is 0 at step 0).
+        self.endpoint_features_enabled = bool(endpoint_features_enabled)
+        self.endpoint_n_layers_per_side = int(endpoint_n_layers_per_side)
+        if self.endpoint_features_enabled:
+            self.endpoint_proj = SO3_Linear(
+                2 * self.endpoint_n_layers_per_side * sphere_channels,
+                sphere_channels, lmax=input_lmax,
+            )
+            nn.init.zeros_(self.endpoint_proj.weight)
+            nn.init.zeros_(self.endpoint_proj.bias)
 
         if delta_endpoint_channels > 0:
-            self.delta_proj = SO3_Linear(1, delta_endpoint_channels, lmax=input_lmax)
+            # v7-2a: head consumes TWO endpoints (R and P) per atom rather than
+            # one (the v6 partner-only signal). Input channel count to delta_proj
+            # is therefore 2 (one for delta_R, one for delta_P); output channels
+            # stay `delta_endpoint_channels`. delta_fuse output unchanged.
+            self.n_delta_endpoints = 2
+            self.delta_proj = SO3_Linear(
+                self.n_delta_endpoints, delta_endpoint_channels, lmax=input_lmax,
+            )
             self.delta_fuse = SO3_Linear(
                 sphere_channels + delta_endpoint_channels, sphere_channels, lmax=input_lmax,
             )
             # Zero-init so at init Mode 1 ≡ Mode 0 (Δ contributes nothing).
-            # Training learns useful weights from the partner signal.
+            # Training learns useful weights from the (R, P) endpoint signals.
             nn.init.zeros_(self.delta_proj.weight)
             nn.init.zeros_(self.delta_proj.bias)
 
@@ -172,6 +221,22 @@ class VelocityHead(nn.Module):
             )
             nn.init.zeros_(self.force_proj.weight)
             nn.init.zeros_(self.force_proj.bias)
+
+        # v7-3: Dimer-modified force `F_dimer = F − 2(F·ê)ê` precomputed by the
+        # caller from raw F and the predicted eigenmode. Same per-atom l=1
+        # projection+fuse pattern as the raw-force injection. Zero-init so the
+        # v7-3 head numerically ≡ the v7-2b head at init — the F_dimer signal
+        # only "turns on" once both `dimer_proj` weights and the eigenmode head
+        # have learned something useful, which avoids destabilising early
+        # training when the eigenmode prediction is still random.
+        self.dimer_force_channels = int(dimer_force_channels)
+        if self.dimer_force_channels > 0:
+            self.dimer_proj = SO3_Linear(1, self.dimer_force_channels, lmax=input_lmax)
+            self.dimer_fuse = SO3_Linear(
+                sphere_channels + self.dimer_force_channels, sphere_channels, lmax=input_lmax,
+            )
+            nn.init.zeros_(self.dimer_proj.weight)
+            nn.init.zeros_(self.dimer_proj.bias)
 
         # Mode 1 v4 — force-residual at output:  v_out = v_raw − α · F.
         # Learnable scalar α; init at 0.1 so force has *some* contribution from
@@ -203,18 +268,34 @@ class VelocityHead(nn.Module):
     def _inject_delta(self, x: torch.Tensor, delta_endpoint: torch.Tensor) -> torch.Tensor:
         """Build the per-atom Δ irrep tensor and fuse into UMA features.
 
-        delta_endpoint: (N, 3) per-atom partner displacement.
-        Returns: (N, num_sph, sphere_channels) — same shape as input x.
+        v7-2a: `delta_endpoint` is (N, n_ep, 3) — n_ep=2 for (delta_R, delta_P).
+        We pack it into a `(N, num_sph, n_ep)` irrep tensor and project to
+        `(N, num_sph, C_d)` via SO3_Linear(n_ep, C_d), then concat-and-fuse with
+        UMA features. The l=0 slot of channel k holds ‖delta_k‖ (an invariant);
+        the l=1 slots hold delta_k itself (an equivariant 3-vector); l≥2 stay 0.
+        Returns: (N, num_sph, sphere_channels).
         """
         N, num_sph, _ = x.shape
-        irreps = torch.zeros(N, num_sph, 1, device=x.device, dtype=x.dtype)
-        # l=0 slot at index 0: invariant magnitude.
-        irreps[:, 0, 0] = torch.linalg.norm(delta_endpoint, dim=-1)
-        # l=1 slots at indices 1..3: equivariant 3-vector.
-        irreps[:, 1:4, 0] = delta_endpoint
-        delta_feats = self.delta_proj(irreps)  # (N, num_sph, C_d)
-        fused = torch.cat([x, delta_feats], dim=-1)  # (N, num_sph, C+C_d)
-        return self.delta_fuse(fused)  # (N, num_sph, C)
+        if delta_endpoint.dim() != 3 or delta_endpoint.shape[-1] != 3:
+            raise ValueError(
+                f"v7-2a expects delta_endpoint of shape (N, n_ep, 3); "
+                f"got {tuple(delta_endpoint.shape)}"
+            )
+        n_ep = delta_endpoint.shape[1]
+        if n_ep != self.n_delta_endpoints:
+            raise ValueError(
+                f"delta_endpoint has {n_ep} endpoints but head was built with "
+                f"n_delta_endpoints={self.n_delta_endpoints}"
+            )
+        irreps = torch.zeros(N, num_sph, n_ep, device=x.device, dtype=x.dtype)
+        # l=0 slot, per channel: invariant magnitude of each delta vector.
+        irreps[:, 0, :] = torch.linalg.norm(delta_endpoint, dim=-1)        # (N, n_ep)
+        # l=1 slots (3 components), per channel: the delta vector itself.
+        # delta_endpoint is (N, n_ep, 3); we want (N, 3, n_ep) at indices 1..3.
+        irreps[:, 1:4, :] = delta_endpoint.transpose(-1, -2)               # (N, 3, n_ep)
+        delta_feats = self.delta_proj(irreps)                               # (N, num_sph, C_d)
+        fused = torch.cat([x, delta_feats], dim=-1)                         # (N, num_sph, C+C_d)
+        return self.delta_fuse(fused)                                       # (N, num_sph, C)
 
     def _inject_force(self, x: torch.Tensor, force_field: torch.Tensor) -> torch.Tensor:
         """Build the per-atom F irrep tensor and fuse into features.
@@ -230,6 +311,38 @@ class VelocityHead(nn.Module):
         fused = torch.cat([x, force_feats], dim=-1)
         return self.force_fuse(fused)
 
+    def _inject_dimer_force(
+        self, x: torch.Tensor, dimer_force: torch.Tensor,
+    ) -> torch.Tensor:
+        """v7-3: same projection-and-fuse pattern as `_inject_force`, applied
+        to the per-atom Dimer-modified force `F_dimer = F − 2(F·ê)ê`. Caller
+        is responsible for computing F_dimer per-system (it requires the
+        full-system 3N inner product, which can't be done atom-locally).
+        """
+        N, num_sph, _ = x.shape
+        irreps = torch.zeros(N, num_sph, 1, device=x.device, dtype=x.dtype)
+        irreps[:, 0, 0] = torch.linalg.norm(dimer_force, dim=-1)
+        irreps[:, 1:4, 0] = dimer_force
+        feats = self.dimer_proj(irreps)
+        fused = torch.cat([x, feats], dim=-1)
+        return self.dimer_fuse(fused)
+
+    def _inject_endpoints(
+        self, x: torch.Tensor, endpoint_features: torch.Tensor,
+    ) -> torch.Tensor:
+        """v7-2b: additively project UMA-encoded R and P features into trunk.
+
+        endpoint_features: (N, num_sph, 2*sphere_channels) — channel-wise
+        concatenation of [R_feats, P_feats] per atom. Atom alignment is
+        guaranteed because R/S/P share the same atom ordering per triplet.
+
+        Returns: (N, num_sph, sphere_channels) — `x + endpoint_proj(endpoint_features)`.
+        Zero-init on `endpoint_proj` means at init this addition is exactly 0,
+        so v7-2b ≡ v7-2a numerically until training lifts the projection
+        weights off zero.
+        """
+        return x + self.endpoint_proj(endpoint_features)
+
     def forward(
         self,
         x: torch.Tensor,
@@ -237,6 +350,8 @@ class VelocityHead(nn.Module):
         batch_idx: torch.Tensor | None = None,
         delta_endpoint: torch.Tensor | None = None,
         force_field: torch.Tensor | None = None,
+        endpoint_features: torch.Tensor | None = None,
+        dimer_force: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Args:
@@ -245,7 +360,8 @@ class VelocityHead(nn.Module):
                 `t` per system and a `batch_idx` of length N.
             batch_idx: (N,) long mapping each atom to its system (0..B-1).
                 May be None iff all atoms share a single scalar `t`.
-            delta_endpoint: (N, 3) per-atom partner displacement (Mode 1). When
+            delta_endpoint: (N, n_ep, 3) per-atom endpoint displacements (Mode 1).
+                v7-2a passes n_ep=2: [delta_R, delta_P] per atom. When
                 `delta_endpoint_channels == 0` this must be None; otherwise it
                 must be provided.
         Returns:
@@ -264,10 +380,38 @@ class VelocityHead(nn.Module):
                 f"got force_field={'None' if force_field is None else 'tensor'}, "
                 f"force_field_channels={self.force_field_channels}"
             )
+        if (endpoint_features is None) != (not self.endpoint_features_enabled):
+            raise ValueError(
+                "endpoint_features must be provided iff endpoint_features_enabled; "
+                f"got endpoint_features={'None' if endpoint_features is None else 'tensor'}, "
+                f"endpoint_features_enabled={self.endpoint_features_enabled}"
+            )
+        if (dimer_force is None) != (self.dimer_force_channels == 0):
+            raise ValueError(
+                "dimer_force must be provided iff dimer_force_channels > 0; "
+                f"got dimer_force={'None' if dimer_force is None else 'tensor'}, "
+                f"dimer_force_channels={self.dimer_force_channels}"
+            )
+        # v7-5: if the caller stacked multi-layer X_T features (factor>1),
+        # project (N, num_sph, factor*C) → (N, num_sph, C) so the rest of the
+        # head pipeline operates on sphere_channels-wide features. Asserts the
+        # caller fed the right shape.
+        if self.x_input_channel_factor > 1:
+            expected_C = self.x_input_channel_factor * self.sphere_channels
+            if x.shape[-1] != expected_C:
+                raise ValueError(
+                    f"x_input_channel_factor={self.x_input_channel_factor} "
+                    f"expects last-dim {expected_C}, got x.shape={tuple(x.shape)}"
+                )
+            x = self.input_proj(x)
         if delta_endpoint is not None:
             x = self._inject_delta(x, delta_endpoint)
         if force_field is not None:
             x = self._inject_force(x, force_field)
+        if dimer_force is not None:
+            x = self._inject_dimer_force(x, dimer_force)
+        if endpoint_features is not None:
+            x = self._inject_endpoints(x, endpoint_features)
 
         x_l01 = get_l_component_range(x, l_min=0, l_max=1)  # (N, 4, C)
 
