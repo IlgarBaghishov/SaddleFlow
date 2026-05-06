@@ -4,11 +4,8 @@ Train SaddleFlow on the Li-on-C defective-graphene test case.
 Data: `train_set.traj` with flat `[R1, S1, P1, R2, S2, P2, …]` ordering (no
 `side` info required — `validate_triplet` falls back to positional ordering).
 All reusable machinery lives in `saddleflow`; this script is only argparse +
-wiring.
-
-Sampling: ice-cream-cone of x_0 around the r_R → r_S axis. The per-sample
-ball radius at r_S is `R_TS = min(alpha · |Δ|, R_max)`; default alpha=0.5
-(30° cone half-angle) and R_max=1.0 Å.
+wiring. Uses Mode 1 (product-conditional) — each triplet contributes both
+`(R, P)` and `(P, R)` pairings via the dataset's R↔P doubling.
 
 Launch:
     python examples/LiC/train.py
@@ -54,14 +51,11 @@ def parse_args():
     p.add_argument("--attn-heads", type=int, default=8)
     p.add_argument("--head-depth", type=int, default=3)
 
-    # Training mode.
-    p.add_argument("--mode", type=int, default=1,
-                   help="0 = ice-cream-cone (legacy single-mobile-atom recipe); "
-                        "1 = product-conditional (uses partner endpoint, no noise) — DEFAULT; "
-                        "2 = Dimer-trajectory (NotImplementedError; dataset only).")
+    # Training mode (only mode=1 is implemented; reserved for future modes).
+    p.add_argument("--mode", type=int, default=1)
     p.add_argument("--delta-endpoint-channels", type=int, default=32,
-                   help="Mode 1 only. Channel count for the partner-displacement "
-                        "feature in VelocityHead. Default 32 — analogue of time_embed_dim.")
+                   help="Channel count for the partner-displacement feature in "
+                        "VelocityHead. Default 32 — analogue of time_embed_dim.")
 
     # Mode 1 architecture knobs. **Defaults are v6**: unfreeze blocks[-1] and
     # blocks[-2], time-FiLM at both injection points, force-FiLM at both
@@ -113,13 +107,6 @@ def parse_args():
                         "TimeFiLMBackbone injection point alongside time-FiLM. "
                         "Requires --early-time-film and --inject-force.")
 
-    # Mode 0 — ice-cream-cone sampling of x_0.
-    p.add_argument("--alpha", type=float, default=0.5,
-                   help="cone half-angle = arcsin(alpha). Default 0.5 = 30°, "
-                        "fits inside a C_6v wedge. Mode 0 only.")
-    p.add_argument("--R-max", type=float, default=1.0,
-                   help="Å. Absolute cap on the ball radius at r_S. Mode 0 only.")
-
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     return p.parse_args()
 
@@ -137,15 +124,8 @@ def main():
           f"<||Δ||> = {dataset.delta_norm_mean:.4f} Å")
 
     M = int((~dataset[0]["fixed"]).sum().item())
-    if args.mode == 0:
-        print(f"[train] mode 0 — ice-cream-cone")
-        print(f"[train] alpha={args.alpha}  R_max={args.R_max} Å  (M={M})")
-    elif args.mode == 1:
-        print(f"[train] mode 1 — product-conditional (no noise on x_0)")
-        print(f"[train] delta_endpoint_channels={args.delta_endpoint_channels}  (M={M})")
-    else:
-        raise SystemExit(f"--mode {args.mode} is not yet wired into the trainer "
-                         f"(mode 2 dataset is in place but the loss is not).")
+    print(f"[train] mode 1 — product-conditional (no noise on x_0)")
+    print(f"[train] delta_endpoint_channels={args.delta_endpoint_channels}  (M={M})")
 
     print(f"[train] loading backbone {args.backbone!r} onto {args.device}")
     raw_backbone = load_uma_backbone(
@@ -210,7 +190,6 @@ def main():
     loss_module = FlowMatchingLoss(
         FlowMatchingConfig(
             mode=args.mode,
-            alpha=args.alpha, R_max_abs=args.R_max,
             xt_perturb_sigma=args.xt_perturb_sigma,
         ),
         backbone, attn, head,
@@ -245,7 +224,6 @@ def main():
             "mode": args.mode,
             "delta_endpoint_channels": head_delta_C,
             "force_field_channels": head_force_C,
-            "alpha": args.alpha, "R_max": args.R_max,
             "backbone": args.backbone,
             "attn_layers": args.attn_layers, "attn_heads": args.attn_heads,
             "head_depth": args.head_depth,

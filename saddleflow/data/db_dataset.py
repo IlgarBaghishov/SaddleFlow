@@ -55,10 +55,9 @@ class AseDbSaddleDataset(Dataset):
             if type(c).__name__ == "FixAtoms":
                 fixed[c.index] = True
 
-        # `partner_un_pos` was added in the Mode-1 release; older DBs may not
-        # have it. Fall back to a copy of `start_pos` (delta_partner = 0) so
-        # Mode-0 training continues to work, but Mode-1 training requires a DB
-        # converted with the new `convert_to_db`.
+        # `partner_un_pos` is required by the released training scheme.
+        # Older DBs without it fall back to a copy of `start_pos`
+        # (delta_partner = 0), but those DBs cannot be used for training.
         if "partner_un_pos" in data:
             partner_un = torch.tensor(np.asarray(data["partner_un_pos"]), dtype=torch.float32)
         else:

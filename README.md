@@ -1,17 +1,16 @@
 # SaddleFlow
 
-Generative AI for **transition-state discovery** in periodic materials.
+Generative AI for **transition-state structures** in periodic materials.
 
-Given only a reactant geometry, SaddleFlow proposes plausible saddle-point structures — no product state required. The target use case is reaction discovery for batteries, catalysts, and bulk materials, where current workflows (NEB, Dimer) require an a-priori guess of the reaction's end state.
+Given a reactant–product pair `(R, P)`, SaddleFlow uses flow matching to propose the saddle structure connecting them. The target use case is high-throughput reaction screening for batteries, catalysts, and bulk materials, where many `(R, P)` pairs are cheap to enumerate but each NEB / Dimer search to find the saddle is expensive.
 
 ## Status
 
-Working end-to-end on the Li-on-carbon test case:
-- Training flowing from reactant `r_R` through flow-matching to the saddle `r_S`.
-- Inference generating diverse candidate saddles via perturbation + Euler integration.
-- Evaluation against NEB-computed reference saddles.
+- Working end-to-end on the MaterialsSaddles `mp20bat` subset (~34,742 NEB-CI saddles from Materials Project battery structures).
+- Two smaller worked examples on Li-on-graphene, useful for quick experimentation: defective sheet (`examples/LiC/`) and pristine sheet (`examples/LiC_simpler/`).
+- Core training scheme is product-conditional flow matching: `x_0 = (R + P)/2` (PBC-correct midpoint), `x_1 = saddle`, with the velocity head reading a per-atom Δ_partner = MIC(partner − x_t) at every flow step.
 
-See [`CLAUDE.md`](CLAUDE.md) for the full methods specification, and [`examples/LiC/`](examples/LiC/) and [`examples/LiC_simpler/`](examples/LiC_simpler/) for working training + evaluation scripts.
+See [`CLAUDE.md`](CLAUDE.md) for the full methods specification, and [`examples/MP20Bat/`](examples/MP20Bat/) for the production training + evaluation pipeline.
 
 ## Installation
 
@@ -27,79 +26,63 @@ Use **Python 3.12** — fairchem-core 2.19 builds cleanly on 3.12 but has had wh
 
 First UMA load downloads the `uma-s-1p2` checkpoint from HuggingFace and requires a valid `HF_TOKEN` (or a `huggingface-cli login`).
 
-## Quickstart
+## Quickstart — sample a saddle from a trained checkpoint
 
 ```python
 import torch
 from ase.io import read
 
-from saddleflow.data import atoms_to_sample_dict
-from saddleflow.flow import sample_saddles
-from saddleflow.models import GlobalAttn, VelocityHead
-from saddleflow.utils import load_ema_weights, load_uma_backbone
+from saddleflow.flow.sampler import sample_saddles
+# ... load_model is provided per-example; see examples/MP20Bat/sample_and_distance_eval.py
 
-# Load a trained checkpoint.
-ckpt_dir = "examples/LiC/runs/icecream_winner/checkpoint_final"
-backbone = load_uma_backbone("uma-s-1p2", device="cuda", freeze=True, eval_mode=True)
-attn = GlobalAttn(sphere_channels=128, lmax=2, num_heads=8, num_layers=1).to("cuda").eval()
-head = VelocityHead(sphere_channels=128, input_lmax=2, depth=1).to("cuda").eval()
-load_ema_weights(ckpt_dir, [attn, head], device="cuda")
+# Load a trained checkpoint (architecture is rebuilt from the run's config.json).
+ckpt_dir = "$SCRATCH/SaddleFlow_mp20bat/runs/<RUN>/checkpoint_final"
+loss_module, _config = load_model(ckpt_dir, device="cuda", use_ema=True)
 
-# Generate candidate saddles for a reactant.
-reactant = read("my_reactant.traj")
+# Read reactant and product geometries (ASE-readable formats).
+R = read("my_reactant.traj")
+P = read("my_product.traj")
+
+# Run deterministic Mode-1 sampling (sigma_inf=0, n_perturbations=1, K Euler steps).
 candidates = sample_saddles(
-    atoms_to_sample_dict(reactant),
-    backbone, attn, head,
-    sigma_inf=0.15,          # Å — Gaussian spread of initial Li positions
-    n_perturbations=32,       # number of independent trajectories
-    K=50,                     # Euler integration steps
+    sample_dict_from_atoms(R, P),    # builds {start_pos, partner_un_pos, Z, cell, fixed, ...}
+    loss_module.backbone,
+    loss_module.global_attn,
+    loss_module.velocity_head,
+    sigma_inf=0.0,
+    n_perturbations=1,
+    K=50,
     device="cuda",
+    partner_pos=...,                  # MIC-unwrapped partner positions
+    # Plus any optional heads / force backbones the run uses; see eval scripts.
 )
-# candidates.shape == (32, N, 3) — cluster + Dimer-refine downstream.
 ```
+
+For end-to-end working examples, see `examples/MP20Bat/sample_and_distance_eval.py` (a 50-case eval that loads a checkpoint, samples saddles for held-out triplets, and writes parity plots and 4-frame `.traj` files for visualization).
 
 ## Training your own model
 
-Two worked examples:
-
-- [`examples/LiC_simpler/`](examples/LiC_simpler/) — minimal single-saddle training on pristine graphene. Good for understanding the recipe; ~18 min on one A100.
-- [`examples/LiC/`](examples/LiC/) — realistic defective-graphene case with 12 training triplets and 171 test triplets. ~3 h on one A100.
-
-Default training command:
-```bash
-python examples/LiC/train.py \
-    --alpha 0.5 --R-max 1.0 \
-    --num-epochs 10000 \
-    --output-dir examples/LiC/runs/my_run
-```
-
-## Objectives
-
-Training supports two complementary objectives that can be mixed per-batch:
-
-- **obj 1 — Ice-cream-cone** (default, `--w1 1.0`). Samples `x_0` from a 3D cone around the `r_R → r_S` axis. Shape controlled by **`--alpha`** (cone half-angle = `arcsin(alpha)`; default 0.5 = 30°) and **`--R-max`** (absolute cap on ball radius at `r_S` in Å; default 1.0). This is the recipe that produced the flower field on LiC / LiC_simpler and is the recommended default.
-
-- **obj 2 — Reactant + Gaussian** (default off, `--w2 0.0`). Samples `x_0 = r_R + ε`, with `ε ~ N(0, σ_rs_pert²·I)` on mobile atoms. Useful as a multimodality-breaker regularizer or for multi-mobile-atom systems where the cone geometry isn't directly defined. Enable with `--w2 0.5` (or any positive weight) and tune `--sigma-rs-pert` (default is the dataset rule-of-thumb).
-
-Set `(w_1, w_2)` to blend the two objectives. Per-sample a categorical draw over `(w_1, w_2)` selects which objective supervises that sample. Defaults to `(1.0, 0.0)` = pure obj 1.
-
-## Visualizing results
+The production example is `examples/MP20Bat/`:
 
 ```bash
-python examples/LiC/visualize.py \
-    --ckpt-dir examples/LiC/runs/icecream_winner/checkpoint_final \
-    --plot trajectories \
-    --sigma-inf 0.15
+cd $SCRATCH/SaddleFlow_mp20bat            # so SLURM logs land on scratch
+sbatch $WORK/codes/SaddleFlow/examples/MP20Bat/run.sh
 ```
 
-This produces a per-checkpoint `trajectories.png` with Li trajectories fanning out from every unique test-set reactant site to their neighbouring saddles — the "flower" pattern that signals a correctly trained velocity field.
+This trains on the full `mp20bat` subset (~34,742 triplets) for 60 epochs with 4 nodes × 3 A100s, then auto-runs a 50-case post-training eval. Heavy outputs (checkpoints, eval `.npz`, `.traj` files) all land under `$SCRATCH/SaddleFlow_mp20bat/runs/<TIMESTAMP>/`. See [`examples/MP20Bat/README.md`](examples/MP20Bat/README.md) for the full pipeline (training → full-test-set eval at K=10 → K=10 vs K=50 stability → paper-style parity figures).
+
+For a quick sanity-check on small data:
+
+- [`examples/LiC_simpler/`](examples/LiC_simpler/) — single-saddle training on pristine graphene (1 triplet); ~18 min on one A100.
+- [`examples/LiC/`](examples/LiC/) — defective-graphene case with 12 train + 171 test triplets; ~3 h on one A100.
 
 ## Method (in brief)
 
-- **Flow matching** over atomic Cartesian coordinates (straight-line Optimal Transport from an initial perturbation of the reactant to the saddle).
-- **Ice-cream-cone sampling of x_0.** At training time, x_0 is drawn uniformly from a 3D cone with apex at the reactant `r_R` and a full 3D ball of radius `R_TS = min(α·|Δ|, R_max)` at the saddle `r_S`. The cone side is tangent to the ball at a circle; cone half-angle = `arcsin(R_TS/|Δ|)`. This finite-support sampling region was the key innovation that replaced the failed three-objective (obj 1/2/3) Gaussian-perturbation scheme — see [`CLAUDE.md`](CLAUDE.md) for why.
-- **Velocity field** = pretrained **UMA** (fairchem) as a frozen backbone + a small equivariant `VelocityHead` + a light `GlobalAttn` layer, trained on top.
-- **Multimodality via perturbation at inference.** Different random draws of `ε_inf` at t=0 land Li in different wedges of its local environment; the learned velocity field routes each draw to a distinct saddle.
+- **Flow matching** over atomic Cartesian coordinates with straight-line Optimal Transport from `x_0` to `x_1 = saddle`.
+- **Product-conditional anchoring.** `x_0 = (R + P)/2` is the PBC-correct geodesic midpoint of the reactant–product pair, and the velocity head is conditioned on a per-atom Δ_partner = MIC(partner − x_t) at every flow step. This re-parameterises the L2-Bayes-optimal predictor from `E[saddle] − R ≈ midpoint − R` (large) to `E[saddle] − midpoint ≈ 0` (small) — the head only has to predict the residual deviation of the saddle from the midpoint, not rediscover the midpoint itself.
+- **Velocity field** = pretrained **UMA-S-1.2** (fairchem, 6.6M active params) as the equivariant backbone, equivariant time-FiLM injected at each backbone block, and a small `VelocityHead` on top. Selectively-unfrozen UMA blocks at low LR (1e-5) let the backbone adapt its layer-N l ≥ 1 outputs to the velocity-prediction task.
+- **R↔P doubling.** Each triplet contributes both `(start=R, partner=P)` and `(start=P, partner=R)` training pairs, so the head sees the saddle from both directions and the parity isn't a learned bias.
+- **Inference perturbation.** A small Gaussian `ε_inf` on the start position at `t=0` lets multiple integrations from the same `(R, P)` pair land in different angular wedges of the local environment, producing a small ensemble of saddle candidates that can be clustered downstream.
 
 ## Built on
 

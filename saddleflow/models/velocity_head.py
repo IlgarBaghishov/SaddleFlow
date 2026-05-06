@@ -96,15 +96,16 @@ class UMAGate(nn.Module):
 
 
 class VelocityHead(nn.Module):
-    """Equivariant velocity head; optionally Mode-1 product-conditional.
+    """Equivariant velocity head with optional partner-conditional injection.
 
-    **Mode 0 (delta_endpoint_channels=0).** Backward-compatible default. The
-    head sees only UMA features and time `t`; no partner conditioning. Used by
-    the existing ice-cream-cone training recipe.
+    **Without partner injection (`delta_endpoint_channels=0`).** The head sees
+    only UMA features and time `t`. Useful for ablation; the released training
+    scheme always uses partner injection.
 
-    **Mode 1 (delta_endpoint_channels > 0).** A per-atom partner-displacement
-    vector `Δ_partner = partner − x_t` (MIC-shortest image) is injected into
-    the head before the time-FiLM. Equivariance construction:
+    **With partner injection (`delta_endpoint_channels > 0`).** A per-atom
+    partner-displacement vector `Δ_partner = partner − x_t` (MIC-shortest
+    image) is injected into the head before the time-FiLM. Equivariance
+    construction:
 
       • Build a single-channel irrep tensor with l=0 = ‖Δ‖, l=1 = Δ, l≥2 = 0.
       • `delta_proj` (an `SO3_Linear(1, C_d, lmax)`) expands it to `C_d` channels.
@@ -113,12 +114,12 @@ class VelocityHead(nn.Module):
       • `delta_fuse` (an `SO3_Linear(sphere_channels + C_d, sphere_channels, lmax)`)
         mixes UMA channels and Δ channels per-l (l=0↔l=0 only, l=1↔l=1 only —
         SO3_Linear keeps paths decoupled, which is required for equivariance).
-      • Then proceed exactly as Mode 0 (time-FiLM on l=0,1 slice; final SO3_Linear).
+      • Then proceed with time-FiLM on l=0,1 slice and the final SO3_Linear.
 
     `delta_proj` is zero-initialised (weight and bias), so at init Δ has zero
-    contribution and the Mode-1 head is numerically identical to the Mode-0
-    head. The "partner direction" signal is learned from Mode-1 training data,
-    starting from the validated Mode-0 baseline architecturally.
+    contribution and the partner-injecting head is numerically identical to
+    the UMA-only head. The "partner direction" signal is learned from
+    training data on top of that baseline.
 
     Why not e3nn / direct concat without `delta_proj`? `SO3_Linear` requires
     a fixed channel count to mix; `delta_proj`'s sole job is to expand a
@@ -205,7 +206,8 @@ class VelocityHead(nn.Module):
             self.delta_fuse = SO3_Linear(
                 sphere_channels + delta_endpoint_channels, sphere_channels, lmax=input_lmax,
             )
-            # Zero-init so at init Mode 1 ≡ Mode 0 (Δ contributes nothing).
+            # Zero-init so at init the partner injection contributes nothing
+            # and the head is numerically identical to the UMA-only baseline.
             # Training learns useful weights from the (R, P) endpoint signals.
             nn.init.zeros_(self.delta_proj.weight)
             nn.init.zeros_(self.delta_proj.bias)

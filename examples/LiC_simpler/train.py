@@ -5,8 +5,9 @@ Data: `one_saddle.traj` — a single `[R, S, P]` triplet for one Li-hop on a
 defect-free carbon sheet (112 C + 1 Li, Li at index 112). The graphene
 lattice is 6-fold symmetric around a Li adsorption site, so there are 6
 equivalent saddles in the full symmetry orbit; we train on only one of
-them and rely on ice-cream-cone sampling + UMA's SO(3) equivariance to
-propagate the learned curving to all 6 wedges at inference.
+them and rely on Mode 1 (product-conditional, midpoint-of-(R,P) start)
+plus UMA's SO(3) equivariance to propagate the learned field to all 6
+wedges at inference.
 
 Launch:
     CUDA_VISIBLE_DEVICES=0 python examples/LiC_simpler/train.py
@@ -27,10 +28,10 @@ def parse_args():
     here = Path(__file__).resolve().parent
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--train-traj", default=str(here / "one_saddle.traj"))
-    p.add_argument("--output-dir", default=str(here / "runs" / "icecream_v0"))
+    p.add_argument("--output-dir", default=str(here / "runs" / "mode1_v0"))
 
     # 1 triplet → 2 records after R/P doubling; with batch_size=2, 1 step/epoch.
-    # 10k steps matches the convergence timescale of the ice-cream-cone recipe.
+    # 10k steps gives a comfortable convergence margin.
     p.add_argument("--num-epochs", type=int, default=10000)
     p.add_argument("--batch-size", type=int, default=2)
     p.add_argument("--learning-rate", type=float, default=1e-3)
@@ -52,20 +53,11 @@ def parse_args():
     p.add_argument("--attn-heads", type=int, default=8)
     p.add_argument("--head-depth", type=int, default=1)
 
-    # Training mode.
-    p.add_argument("--mode", type=int, default=1,
-                   help="0 = ice-cream-cone (legacy single-mobile-atom recipe); "
-                        "1 = product-conditional (uses partner endpoint, no noise) — DEFAULT; "
-                        "2 = Dimer-trajectory (NotImplementedError; dataset only).")
+    # Training mode (only mode=1 is implemented; reserved for future modes).
+    p.add_argument("--mode", type=int, default=1)
     p.add_argument("--delta-endpoint-channels", type=int, default=32,
-                   help="Mode 1 only. Channel count for the partner-displacement "
-                        "feature in VelocityHead. Default 32 — analogue of time_embed_dim.")
-
-    # Mode 0 — ice-cream-cone sampling of x_0.
-    p.add_argument("--alpha", type=float, default=0.5,
-                   help="cone half-angle = arcsin(alpha). Default 0.5 = 30°. Mode 0 only.")
-    p.add_argument("--R-max", type=float, default=1.0,
-                   help="Å. Absolute cap on the ball radius at r_S. Mode 0 only.")
+                   help="Channel count for the partner-displacement feature in "
+                        "VelocityHead. Default 32 — analogue of time_embed_dim.")
 
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     return p.parse_args()
@@ -84,15 +76,8 @@ def main():
           f"<||Δ||> = {dataset.delta_norm_mean:.4f} Å")
 
     M = int((~dataset[0]["fixed"]).sum().item())
-    if args.mode == 0:
-        print(f"[train] mode 0 — ice-cream-cone")
-        print(f"[train] alpha={args.alpha}  R_max={args.R_max} Å  (M={M})")
-    elif args.mode == 1:
-        print(f"[train] mode 1 — product-conditional (no noise on x_0)")
-        print(f"[train] delta_endpoint_channels={args.delta_endpoint_channels}  (M={M})")
-    else:
-        raise SystemExit(f"--mode {args.mode} is not yet wired into the trainer "
-                         f"(mode 2 dataset is in place but the loss is not).")
+    print(f"[train] mode 1 — product-conditional (no noise on x_0)")
+    print(f"[train] delta_endpoint_channels={args.delta_endpoint_channels}  (M={M})")
 
     print(f"[train] loading backbone {args.backbone!r} onto {args.device}")
     backbone = load_uma_backbone(args.backbone, device=args.device, freeze=True, eval_mode=True)
@@ -112,7 +97,6 @@ def main():
     loss_module = FlowMatchingLoss(
         FlowMatchingConfig(
             mode=args.mode,
-            alpha=args.alpha, R_max_abs=args.R_max,
         ),
         backbone, attn, head,
     )
@@ -128,7 +112,6 @@ def main():
         extras={
             "mode": args.mode,
             "delta_endpoint_channels": head_delta_C,
-            "alpha": args.alpha, "R_max": args.R_max,
             "backbone": args.backbone,
             "attn_layers": args.attn_layers, "attn_heads": args.attn_heads,
             "head_depth": args.head_depth,

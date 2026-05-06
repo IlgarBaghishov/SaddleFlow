@@ -23,7 +23,7 @@ How the partners are gathered:
 
 Run:
     CUDA_VISIBLE_DEVICES=0 python examples/LiC/visualize_mode1.py \\
-        --ckpt-dir examples/LiC/runs/icecream_winner/checkpoint_final
+        --ckpt-dir examples/LiC/runs/mode1_v6/checkpoint_final
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ def parse_args():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("--ckpt-dir",
-                   default=str(here / "runs" / "icecream_winner" / "checkpoint_final"))
+                   default=str(here / "runs" / "mode1_v6" / "checkpoint_final"))
     p.add_argument("--no-ema", action="store_true",
                    help="load raw point-estimate weights instead of EMA shadow.")
     p.add_argument("--train-traj", default=str(here / "train_set.traj"))

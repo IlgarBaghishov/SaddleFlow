@@ -45,7 +45,7 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--train-traj", default=str(here / "train_set.traj"))
     p.add_argument("--test-traj", default=str(here / "test_set.traj"))
-    p.add_argument("--ckpt-dir", default=str(here / "runs" / "icecream_winner" / "checkpoint_final"))
+    p.add_argument("--ckpt-dir", default=str(here / "runs" / "mode1_v6" / "checkpoint_final"))
 
     p.add_argument("--n-perturbations", type=int, default=32)
     p.add_argument("--K", type=int, default=50)

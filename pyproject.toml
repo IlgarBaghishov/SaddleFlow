@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "saddleflow"
 version = "0.0.1"
-description = "Flow-matching generation of transition-state structures for periodic materials, conditioned on the reactant alone."
+description = "Flow-matching generation of transition-state structures for periodic materials, given a reactant–product pair."
 license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.11, <3.14"

@@ -1,22 +1,11 @@
 """
 Flow-matching training loss for SaddleFlow.
 
-Each `mode` of `FlowMatchingConfig` defines exactly one straight-line OT
-objective; modes are mutually exclusive (no per-sample mixing):
-
-    Mode 0 — Ice-cream-cone around the r_R→r_S axis. x_0 is drawn uniformly
-             from the union of balls B(c, R(c)·|c−r_R|/|Δ|) for c on [r_R, r_S],
-             with R_TS = min(alpha·|Δ|, R_max_abs). Single mobile atom only;
-             the legacy recipe that produced the flower field on LiC / LiC_simpler.
-
-    Mode 1 — Product-conditional (no noise). x_0 = start exactly; the head
-             receives a per-atom partner-displacement Δ_partner = MIC(partner − x_t)
-             at every flow step. The R/P doubling in the dataset gives a 50/50
-             R-side/P-side split per epoch automatically.
-
-    Mode 2 — Dimer-trajectory (placeholder, not yet wired into the loss).
-             x_0 will be sampled uniformly from the saddle's Dimer + minimization
-             trajectory; the dataset reader is in place, the loss is not.
+Product-conditional straight-line OT: x_0 is taken as the (R, P) midpoint
+(`0.5 * (start + partner_un)`), x_1 is the MIC-unwrapped saddle, and the head
+receives a per-atom partner-displacement Δ_partner = MIC(partner − x_t) at
+every flow step. The R/P doubling in the dataset gives a 50/50 R-side/P-side
+split per epoch automatically.
 
 See CLAUDE.md §"Flow formulation" for derivation.
 """
@@ -40,132 +29,55 @@ from ..models.time_filmed_backbone import MultiLayerCapture, TimeFiLMBackbone
 class FlowMatchingConfig:
     """Training-time sampling hyperparameters.
 
-    **mode** selects the recipe:
-        0 — Mode 0 (ice-cream-cone). Uses `alpha` and `R_max_abs`.
-        1 — Mode 1 (product-conditional). No knobs of its own here — the
-            partner-displacement injection is configured on the head
-            (`VelocityHead.delta_endpoint_channels > 0`).
-        2 — Mode 2 (trajectory). Raises until the loss is wired up.
+    Mode 1 is the only currently-supported training recipe:
+    product-conditional, with x_0 = (R, P) midpoint and the head
+    receiving Δ_partner = MIC(partner − x_t) at every flow step.
     """
 
-    mode: int = 0
+    mode: int = 1
 
-    # Mode 0 — ice-cream-cone
-    alpha: float = 0.5
-    R_max_abs: float = 1.0            # Å
-    max_rejection_tries: int = 100
-
-    # Mode 1 v5 — Gaussian perturbation on x_t before backbone forward.
-    # Default 0.0 disables. Applied to mobile atoms only. Velocity target
-    # stays `saddle − x_0` (unchanged). Forces the model to encounter
-    # off-line samples where force at x_t is informative.
+    # Gaussian perturbation on x_t before backbone forward. Default 0.0
+    # disables. Applied to mobile atoms only. Velocity target stays
+    # `saddle − x_0` (unchanged). Forces the model to encounter off-line
+    # samples where the force at x_t is informative.
     xt_perturb_sigma: float = 0.0
 
-    # v7-5: subtract per-system CoM from BOTH v_pred AND v_target before MSE
-    # (over mobile atoms, only for systems with no frozen atoms — same gating
-    # as `apply_output_projections`). v7-4 only stripped the CoM from v_pred,
-    # leaving an audit-flagged asymmetry. Tiny effect (<1% expected), real
-    # consistency fix. Default False preserves v7-4 behaviour.
+    def __post_init__(self):
+        if self.mode != 1:
+            raise ValueError(
+                f"only mode=1 is supported in this release, got mode={self.mode}"
+            )
+
+    # Subtract per-system CoM from BOTH v_pred AND v_target before MSE
+    # (over mobile atoms, only for systems with no frozen atoms — same
+    # gating as `apply_output_projections`). Symmetrises the loss.
     com_symmetric_loss: bool = False
 
-    # v7-6: PBC-correct convergent velocity target (hybrid schedule).
-    # v7-5 and earlier use the straight-line constant target
-    # `v_target = saddle − midpoint`. On off-line points (whether from
-    # `xt_perturb_sigma > 0` perturbation or from inference-time integration
-    # drift) this trains the model to predict the SAME parallel-to-line
-    # velocity → vector field is non-attractive → off-line drift never
-    # recovers (geometrically: integrating a constant vector field from
-    # off-line just translates parallel, never converges to the saddle).
+    # PBC-correct convergent velocity target (hybrid schedule).
+    # The straight-line constant target `v_target = saddle − midpoint`,
+    # on off-line points (whether from `xt_perturb_sigma > 0` perturbation
+    # or from inference-time integration drift), trains the model to
+    # predict the SAME parallel-to-line velocity → vector field is
+    # non-attractive → off-line drift never recovers (geometrically:
+    # integrating a constant vector field from off-line just translates
+    # parallel, never converges to the saddle).
     #
-    # v7-6 fix uses a hybrid schedule split at `xt_target_correction_t_floor`:
+    # The fix uses a hybrid schedule split at `xt_target_correction_t_floor`:
     #   * t ≤ 1 − t_floor (bulk of training, 90% of t-space when floor=0.1):
     #         x_t  = on_line + Gaussian noise (when xt_perturb_sigma > 0)
     #         v_t  = MIC(saddle − x_t, cell) / (1 − t)        # convergent
     #     denominator is always ≥ t_floor → no singularity, no clamping.
     #   * t >  1 − t_floor (last bit, near-saddle):
     #         x_t  = on_line   (no perturbation)
-    #         v_t  = saddle − midpoint                         # v7-5 original
+    #         v_t  = saddle − midpoint                         # original
     #     keeps the model trained on this t range too (no inference-time OOD
     #     in the time-FiLM); the parallel-to-line failure mode is harmless
     #     here because the remaining ~5 integration steps cover only
     #     dt × σ × K ≈ 0.02 × 0.05 × 5 ≈ 0.005 Å of drift — negligible.
     #
-    # Default False preserves v7-5 behaviour exactly.
+    # Default False preserves the constant-target behaviour.
     xt_target_correction: bool = False
     xt_target_correction_t_floor: float = 0.1
-
-    def __post_init__(self):
-        assert self.mode in (0, 1, 2), f"mode must be 0, 1, or 2, got {self.mode}"
-        assert 0.0 < self.alpha <= 1.0, f"alpha must be in (0, 1], got {self.alpha}"
-        assert self.R_max_abs > 0, f"R_max_abs must be positive, got {self.R_max_abs}"
-        if self.mode == 2:
-            raise NotImplementedError(
-                "Mode 2 (Dimer-trajectory) loss is not implemented yet — only the "
-                "dataset scaffolding has landed. Use mode=0 or mode=1."
-            )
-
-
-def sample_icecream_cone(
-    r_R_mob: torch.Tensor,
-    r_S_mob: torch.Tensor,
-    R_TS: float,
-    max_tries: int,
-    generator: torch.Generator | None,
-    dtype: torch.dtype,
-    device: torch.device,
-) -> torch.Tensor:
-    """Sample one 3D point uniformly from the ice-cream-cone region.
-
-    Region: union over c ∈ [r_R, r_S] of B(c, R_TS · |c − r_R| / |Δ|).
-    Method: rejection sampling on a bounding cylinder of radius R_TS and
-    axial length |Δ| + R_TS, with acceptance check using
-        cone region:  r_perp² · (|Δ|² − R_TS²) < a² · R_TS²   for a ≤ L_cone
-        cap region:   (a − |Δ|)² + r_perp² < R_TS²            for a > L_cone
-    where a is the axial coordinate measured from r_R and L_cone is the
-    tangent-circle position |Δ| − R_TS²/|Δ|.
-    """
-    delta = r_S_mob - r_R_mob
-    mag_delta = torch.linalg.norm(delta)
-    axis = delta / mag_delta
-
-    # Build an orthonormal frame (axis, e1, e2).
-    e_seed = torch.zeros(3, dtype=dtype, device=device)
-    imin = int(torch.argmin(torch.abs(axis)).item())
-    e_seed[imin] = 1.0
-    e1 = e_seed - (e_seed @ axis) * axis
-    e1 = e1 / torch.linalg.norm(e1)
-    e2 = torch.cross(axis, e1, dim=0)
-
-    mag_delta_sq = mag_delta * mag_delta
-    R_TS_sq = R_TS * R_TS
-    L_cone = mag_delta - R_TS_sq / mag_delta
-    denom_cone = mag_delta_sq - R_TS_sq
-    a_max = mag_delta + R_TS
-
-    two_pi = torch.tensor(2.0 * math.pi, dtype=dtype, device=device)
-    last_a = torch.tensor(0.0, dtype=dtype, device=device)
-    last_r = torch.tensor(0.0, dtype=dtype, device=device)
-    last_theta = torch.tensor(0.0, dtype=dtype, device=device)
-
-    for _ in range(max_tries):
-        a = torch.rand((), generator=generator, dtype=dtype, device=device) * a_max
-        V = torch.rand((), generator=generator, dtype=dtype, device=device)
-        r_perp = R_TS * torch.sqrt(V)
-        theta = two_pi * torch.rand((), generator=generator, dtype=dtype, device=device)
-
-        last_a, last_r, last_theta = a, r_perp, theta
-        a_val = a.item()
-        r_val = r_perp.item()
-        if a_val <= L_cone.item():
-            if r_val * r_val * denom_cone.item() < a_val * a_val * R_TS_sq:
-                break
-        else:
-            da = a_val - mag_delta.item()
-            if da * da + r_val * r_val < R_TS_sq:
-                break
-
-    x0 = r_R_mob + last_a * axis + last_r * (torch.cos(last_theta) * e1 + torch.sin(last_theta) * e2)
-    return x0
 
 
 def sample_endpoints(
@@ -173,61 +85,26 @@ def sample_endpoints(
     config: FlowMatchingConfig,
     generator: torch.Generator | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, float, torch.Tensor]:
-    """Build one training example `(x_0, x_1, t, mobile_mask)` per the config's mode.
+    """Build one training example `(x_0, x_1, t, mobile_mask)`.
 
-    Mode 0 — ice-cream-cone sampling of x_0 (requires single mobile atom).
-    Mode 1 — x_0 = start exactly (no noise). The partner-displacement vector
-             is computed inside `FlowMatchingLoss.forward` because it depends
-             on `x_t`, not just `(x_0, x_1)`.
+    `x_0` is the (R, P) midpoint; the partner-displacement vector is
+    computed inside `FlowMatchingLoss.forward` because it depends on `x_t`,
+    not just `(x_0, x_1)`. `partner_un_pos` is already MIC-unwrapped
+    relative to `start`, so the arithmetic mean is the PBC-correct
+    geodesic midpoint. Re-parameterises the L2-Bayes-optimal predictor
+    from `E[saddle] − start ≈ midpoint − start` (large) to
+    `E[saddle] − midpoint ≈ 0`, forcing the head to use its features to
+    predict the *residual* deviation of the saddle from the midpoint
+    instead of rediscovering the midpoint itself.
     """
     r_start = sample["start_pos"]
     r_saddle = sample["saddle_un_pos"]
+    partner = sample["partner_un_pos"]
     mobile = ~sample["fixed"]
-
-    if config.mode == 1:
-        # v7-2a: start integration from the midpoint between R (start) and P
-        # (partner_un_pos), instead of from R. partner_un_pos is already
-        # MIC-unwrapped relative to start, so the arithmetic mean is the
-        # PBC-correct geodesic midpoint. Re-parameterizes the L2-Bayes-optimal
-        # predictor from `E[saddle] - start ≈ midpoint - start` (large) to
-        # `E[saddle] - midpoint ≈ 0`, forcing the head to use its features to
-        # predict the *residual* deviation of the saddle from the midpoint
-        # instead of rediscovering the midpoint itself.
-        partner = sample["partner_un_pos"]
-        x0 = 0.5 * (r_start + partner)
-        x1 = r_saddle
-        t = torch.rand((), generator=generator).item()
-        return x0, x1, t, mobile
-
-    if config.mode == 0:
-        M = int(mobile.sum().item())
-        if M != 1:
-            raise NotImplementedError(
-                f"Mode 0 (ice-cream-cone) currently requires exactly one mobile atom; "
-                f"this sample has {M}. Switch to Mode 1 (product-conditional) for "
-                f"multi-mobile systems, or extend sample_icecream_cone."
-            )
-        r_R_mob = r_start[mobile][0]
-        r_S_mob = r_saddle[mobile][0]
-        dtype = r_saddle.dtype
-        device = r_saddle.device
-        mag_delta = float(torch.linalg.norm(r_S_mob - r_R_mob).item())
-        R_TS = min(config.alpha * mag_delta, config.R_max_abs)
-
-        x0 = r_saddle.clone()
-        if R_TS <= 1e-6 or mag_delta <= 1e-6:
-            x0[mobile] = r_R_mob.unsqueeze(0)
-        else:
-            x0_mob = sample_icecream_cone(
-                r_R_mob, r_S_mob, R_TS,
-                config.max_rejection_tries, generator, dtype, device,
-            )
-            x0[mobile] = x0_mob.unsqueeze(0)
-        x1 = r_saddle
-        t = torch.rand((), generator=generator).item()
-        return x0, x1, t, mobile
-
-    raise ValueError(f"unsupported mode {config.mode} in sample_endpoints")
+    x0 = 0.5 * (r_start + partner)
+    x1 = r_saddle
+    t = torch.rand((), generator=generator).item()
+    return x0, x1, t, mobile
 
 
 def build_atomic_data(
@@ -602,10 +479,10 @@ class FlowMatchingLoss(nn.Module):
         t_values: list[float] = []
         fixed_list: list[torch.Tensor] = []
         delta_partner_list: list[torch.Tensor] = []  # only used in Mode 1
-        eigenmode_targets: list[torch.Tensor] = []   # v7-3: only when aux loss > 0
-        # v7-2b: collect R and P AtomicData per sample so we can run UMA on the
-        # endpoints in static mode (no time-FiLM, no force-FiLM) and feed the
-        # resulting per-atom features to the velocity head.
+        eigenmode_targets: list[torch.Tensor] = []   # only when aux loss > 0
+        # Collect R and P AtomicData per sample so we can run UMA on the
+        # endpoints in static mode (no time-FiLM, no force-FiLM) and feed
+        # the resulting per-atom features to the velocity head.
         want_endpoint_features = (
             self.config.mode == 1
             and getattr(self.velocity_head, "endpoint_features_enabled", False)
@@ -673,12 +550,11 @@ class FlowMatchingLoss(nn.Module):
             fixed_list.append(sample["fixed"])
 
             if self.config.mode == 1:
-                # v7-2a: pass BOTH (R - x_t) and (P - x_t) as per-atom MIC
-                # displacements. Starting from the midpoint, the head needs to
-                # know where both endpoints sit relative to the current point;
-                # passing only the partner (as the v6 head did) loses the
-                # symmetric R-side information. Stacked as (N, 2, 3); the head
-                # now expects a 2-endpoint delta signal.
+                # Pass BOTH (R - x_t) and (P - x_t) as per-atom MIC displacements.
+                # Starting from the midpoint, the head needs to know where both
+                # endpoints sit relative to the current point; passing only the
+                # partner loses the symmetric R-side information. Stacked as
+                # (N, 2, 3); the head expects a 2-endpoint delta signal.
                 start_pos = sample["start_pos"]
                 partner = sample["partner_un_pos"]
                 delta_R = mic_displacement(start_pos, x_t, sample["cell"])
@@ -722,7 +598,7 @@ class FlowMatchingLoss(nn.Module):
 
         delta_partner_all: torch.Tensor | None = None
         if self.config.mode == 1:
-            # v7-2a: shape is (N_total, 2, 3) — [delta_R, delta_P] per atom.
+            # Shape is (N_total, 2, 3) — [delta_R, delta_P] per atom.
             delta_partner_all = torch.cat(delta_partner_list, dim=0).to(device)
 
         # v7-2b: featurize R and P through UMA in static mode FIRST, before the

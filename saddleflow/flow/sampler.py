@@ -41,45 +41,37 @@ def sample_saddles(
     xt_capture=None,
     endpoint_capture=None,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-    """Euler-integrate `n_perturbations` trajectories from perturbed reactant to t=1.
+    """Euler-integrate `n_perturbations` trajectories from x_0 = (R, P) midpoint to t=1.
 
-    **Mode 0 (default).** Pure flow-matching from `r_R + ε` to a saddle, no
-    partner conditioning. `velocity_head` must be a Mode-0 head
-    (`delta_endpoint_channels == 0`). Caller does NOT pass `partner_pos`.
-
-    **Mode 1 (`partner_pos` provided).** Product-conditional flow.
-    **v7-2a:** integration starts at the (R, P) midpoint instead of at R, and
-    the head receives BOTH (R - x_t) and (P - x_t) per atom (stacked as
-    (P*N, 2, 3)). The matching trainer in `FlowMatchingLoss.forward` uses the
-    same x_0 = midpoint and the same 2-endpoint signal, so train/test are
-    aligned. The head must be built with `delta_endpoint_channels > 0` and its
-    `delta_proj` input must accept 2 channels (handled automatically by the
-    v7-2a `VelocityHead.__init__`). Mode 1 is deterministic given
-    `partner_pos`; you typically pass `sigma_inf=0` and `n_perturbations=1` to
-    get a single deterministic prediction.
+    Product-conditional flow. Integration starts at the (R, P) midpoint and
+    the head receives both (R − x_t) and (P − x_t) per atom (stacked as
+    (P*N, 2, 3)) at every flow step. The matching trainer in
+    `FlowMatchingLoss.forward` uses the same x_0 = midpoint and the same
+    2-endpoint signal, so train/test are aligned. The head must be built
+    with `delta_endpoint_channels > 0`. Sampling is deterministic given
+    `partner_pos`; the typical inference call passes `sigma_inf=0` and
+    `n_perturbations=1` for a single deterministic prediction.
 
     Args:
         reactant: a sample dict with the same keys used by `FlowMatchingLoss`
             (`start_pos`, `Z`, `cell`, `fixed`, `task_name`, `charge`, `spin`).
-            `start_pos` is the reactant (or product) structure in Å.
+            `start_pos` is one endpoint structure (R or P) in Å.
         backbone / global_attn / velocity_head: the UMA backbone and the two
             SaddleFlow modules. The caller is responsible for having set `.eval()`
             on them; this routine does NOT toggle training mode.
         sigma_inf: Gaussian std (Å) for the inference-time perturbation that
-            spreads initial Li positions around r_R before Euler integration.
-            Decoupled from training; a value of ~0.15 is typical for LiC Mode 0.
-            For Mode 1 a small value (or 0) is the natural choice.
+            spreads initial positions around the start before Euler integration.
+            Decoupled from training; pass 0 for a deterministic prediction.
         n_perturbations: number of independent trajectories. Default 32.
-        K: number of Euler steps. Default 50 per CLAUDE.md.
+        K: number of Euler steps. Default 50.
         device: override the device (default = `velocity_head`'s device).
         generator: torch.Generator for reproducibility. If provided on CPU while
             the model is on CUDA, perturbations are drawn on CPU and moved —
             identical distribution, just less efficient.
         return_trajectory: if True, also return the full `(K+1, n_perturbations, N, 3)`
             tensor of intermediate positions (including the initial perturbed starts).
-        partner_pos: (N, 3) MIC-unwrapped partner positions (R or P). Required
-            for Mode 1, must be omitted for Mode 0. Same atom ordering as
-            `reactant['start_pos']`.
+        partner_pos: (N, 3) MIC-unwrapped partner positions (R or P). Required;
+            same atom ordering as `reactant['start_pos']`.
 
     Returns:
         `(n_perturbations, N, 3)` candidate saddle positions, wrapped into the unit cell.
@@ -100,18 +92,20 @@ def sample_saddles(
     mobile = ~fixed
     N = r_R.shape[0]
 
-    # Mode-0 vs Mode-1 input validation against the head's configuration.
-    head_mode_1 = getattr(velocity_head, "delta_endpoint_channels", 0) > 0
-    if head_mode_1 and partner_pos is None:
+    # Validate that the head is configured for partner conditioning, which the
+    # released training scheme always uses.
+    head_uses_partner = getattr(velocity_head, "delta_endpoint_channels", 0) > 0
+    if head_uses_partner and partner_pos is None:
         raise ValueError(
-            "velocity_head is configured for Mode 1 (delta_endpoint_channels>0) "
-            "but partner_pos was not provided to sample_saddles."
+            "velocity_head is configured for partner conditioning "
+            "(delta_endpoint_channels>0) but partner_pos was not provided "
+            "to sample_saddles."
         )
-    if (not head_mode_1) and partner_pos is not None:
+    if (not head_uses_partner) and partner_pos is not None:
         raise ValueError(
-            "partner_pos was provided but velocity_head is configured for Mode 0 "
-            "(delta_endpoint_channels==0). Either omit partner_pos or rebuild the "
-            "head with delta_endpoint_channels > 0."
+            "partner_pos was provided but velocity_head was built without "
+            "partner conditioning (delta_endpoint_channels==0). Either omit "
+            "partner_pos or rebuild the head with delta_endpoint_channels > 0."
         )
     partner = partner_pos.to(device) if partner_pos is not None else None
 

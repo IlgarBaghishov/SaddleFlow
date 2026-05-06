@@ -92,7 +92,7 @@ def parse_args():
                         "model+optimizer+EMA+RNG state and continues from the next "
                         "epoch.")
 
-    # Mode (1 = product-conditional, the v6 setup).
+    # Mode (only mode=1 is implemented; reserved for future training modes).
     p.add_argument("--mode", type=int, default=1)
     p.add_argument("--delta-endpoint-channels", type=int, default=32)
     p.add_argument("--force-field-channels", type=int, default=32)
@@ -184,10 +184,6 @@ def parse_args():
     # those blocks weren't pretrained to receive that signal and the head-level
     # injection already gives the model access to F.
     p.add_argument("--force-film", action=argparse.BooleanOptionalAction, default=False)
-
-    # Mode 0 sampling knobs (only used when --mode 0).
-    p.add_argument("--alpha", type=float, default=0.5)
-    p.add_argument("--R-max", type=float, default=1.0)
 
     # Train/val/test split — uses the official parquet splits shipped with the
     # HuggingFace dataset. No client-side random splitting.
@@ -416,7 +412,6 @@ def main():
     loss_module = FlowMatchingLoss(
         FlowMatchingConfig(
             mode=args.mode,
-            alpha=args.alpha, R_max_abs=args.R_max,
             xt_perturb_sigma=args.xt_perturb_sigma,
             com_symmetric_loss=bool(args.com_symmetric_loss),
             xt_target_correction=bool(args.xt_target_correction),
@@ -468,7 +463,6 @@ def main():
             "mode": args.mode,
             "delta_endpoint_channels": head_delta_C,
             "force_field_channels": head_force_C,
-            "alpha": args.alpha, "R_max": args.R_max,
             "backbone": args.backbone,
             "attn_layers": args.attn_layers, "attn_heads": args.attn_heads,
             "head_depth": args.head_depth,

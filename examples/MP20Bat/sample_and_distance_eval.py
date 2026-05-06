@@ -169,8 +169,6 @@ def _build_loss_module(config: dict, device: str) -> FlowMatchingLoss:
     force_C = int(extras.get("force_field_channels", 32))
     force_residual = bool(extras.get("force_residual", False))
     mode = int(extras.get("mode", 1))
-    alpha = float(extras.get("alpha", 0.5))
-    R_max = float(extras.get("R_max", 1.0))
 
     raw_backbone = load_uma_backbone(
         backbone_name, device=device, freeze=True, eval_mode=True,
@@ -270,7 +268,7 @@ def _build_loss_module(config: dict, device: str) -> FlowMatchingLoss:
     com_symmetric_loss = bool(extras.get("com_symmetric_loss", False))
     loss_module = FlowMatchingLoss(
         FlowMatchingConfig(
-            mode=mode, alpha=alpha, R_max_abs=R_max, xt_perturb_sigma=0.0,
+            mode=mode, xt_perturb_sigma=0.0,
             com_symmetric_loss=com_symmetric_loss,
         ),
         backbone, attn, head,
@@ -600,9 +598,9 @@ def main():
         side = sides[i]
         record = dataset[2 * tid + side]
         # Use a per-case CPU generator seeded from (args.seed, i). Doesn't
-        # actually affect Mode-1 deterministic sampling (sigma_inf=0 means
-        # gaussian_perturbation returns zeros), but keeps the API call honest
-        # in case anyone copies this script for Mode 0.
+        # actually affect deterministic sampling (sigma_inf=0 means
+        # gaussian_perturbation returns zeros), but keeps the API call
+        # honest for any future stochastic variant.
         gen = torch.Generator(device="cpu").manual_seed(int(args.seed) * 100003 + i)
         out = run_one_case(record, loss_module, K=args.K, device=device, generator=gen)
         out.update({
