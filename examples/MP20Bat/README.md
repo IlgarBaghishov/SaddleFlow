@@ -1,4 +1,4 @@
-# MaterialsSaddlesTSGen — production training & evaluation
+# MP20Bat — production training & evaluation
 
 Mode-1 product-conditional flow-matching training of **TSGenerator** on the
 `mp20bat` subset of the MaterialsSaddles dataset (NEB-CI saddles from Materials
@@ -37,7 +37,7 @@ top-level `CLAUDE.md` for ablation history.
 
 ```
 $SCRATCH/SaddleFlow_mp20bat/                                  ← run root (override with $SADDLEFLOW_RUN_ROOT)
-└── runs/tsgen_<TIMESTAMP>/
+└── runs/mp20bat_<TIMESTAMP>/
     ├── config.json
     ├── dataset_stats.json
     ├── history.json
@@ -94,7 +94,7 @@ your scratch root* so the SLURM logs land there too:
 
 ```bash
 cd $SCRATCH/SaddleFlow_mp20bat
-sbatch $WORK/codes/SaddleFlow/examples/MaterialsSaddlesTSGen/run.sh
+sbatch $WORK/codes/SaddleFlow/examples/MP20Bat/run.sh
 ```
 
 Everything heavy (checkpoints, EMA, optimizer state, dataset shards, eval npz,
@@ -106,7 +106,7 @@ Expected runtime on 4 × A100: ~30 h for 60 epochs.
 ### 3. Post-training analyses (the paper figures)
 
 ```bash
-RUN=$SCRATCH/SaddleFlow_mp20bat/runs/tsgen_<TIMESTAMP>
+RUN=$SCRATCH/SaddleFlow_mp20bat/runs/mp20bat_<TIMESTAMP>
 
 # Full test set at K=10 (deterministic Euler, ~30 min on 3 GPUs)
 accelerate launch --num_processes 3 --multi_gpu --mixed_precision bf16 \
@@ -129,7 +129,7 @@ Per-epoch checkpoints land at `<output-dir>/checkpoint_epoch_NNNNN`. If SLURM
 times out or a node dies:
 
 ```bash
-RESUME_FROM=$SCRATCH/SaddleFlow_mp20bat/runs/tsgen_PREV/checkpoint_epoch_42 \
+RESUME_FROM=$SCRATCH/SaddleFlow_mp20bat/runs/mp20bat_PREV/checkpoint_epoch_42 \
     sbatch run.sh
 ```
 

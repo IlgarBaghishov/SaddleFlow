@@ -303,7 +303,7 @@ Fully 2D-visualizable, interpretable by eye, small enough to iterate quickly.
 
 ## Training infrastructure
 
-**Plain PyTorch + HuggingFace `accelerate`**, matching the GenFlows pattern. No Hydra, no Lightning, no TorchTNT.
+**Plain PyTorch + HuggingFace `accelerate`**, matching the author's prior flow-matching pattern. No Hydra, no Lightning, no TorchTNT.
 
 - **Optimizer:** AdamW. `lr = 1e-3` (head-only, frozen backbone) or `lr = 1e-5` (end-to-end fine-tuning with UMA unfrozen). Cosine LR schedule, gradient clip `max_norm = 1.0`.
 - **EMA:** decay scales with total training steps — see the EMA-tuning rule below. Default `0.9999` is calibrated for the 30M-triplet production run (≥ 500k steps). For small-scale debug / example runs (a few thousand steps), `0.9999` leaves the shadow frozen at initialization and has to be lowered.
@@ -436,7 +436,7 @@ NERSC Perlmutter, 4 × A100 per node. **Multi-node from day one** for the 30M-tr
 
 ## License
 
-TBD — likely MIT (matching GenFlows). fairchem is MIT.
+MIT — see [`LICENSE`](LICENSE).
 
 ## Latent-bug log — pitfalls already caught; re-check if behaviour looks wrong
 

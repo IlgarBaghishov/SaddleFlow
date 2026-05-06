@@ -6,7 +6,7 @@
 #SBATCH -o logs/slurm_%j.out
 #SBATCH -e logs/slurm_%j.err
 #SBATCH -A _replace_me_
-#SBATCH -J saddleflow_tsgen
+#SBATCH -J saddleflow_mp20bat
 
 # Mode-1 product-conditional flow matching, full UMA-S-1.2 unfreeze, 4-block
 # time-FiLM, hybrid PBC-correct convergent v_target with σ=0.05 Å perturb,
@@ -42,7 +42,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="${SADDLEFLOW_REPO:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 RUN_ROOT="${SADDLEFLOW_RUN_ROOT:-${SCRATCH:?\$SCRATCH is not set}/SaddleFlow_mp20bat}"
-OUT_DIR="$RUN_ROOT/runs/tsgen_$(date +%Y%m%d_%H%M%S)"
+OUT_DIR="$RUN_ROOT/runs/mp20bat_$(date +%Y%m%d_%H%M%S)"
 PYTHON="${SADDLEFLOW_PYTHON:-python}"
 
 # SLURM `#SBATCH -o logs/slurm_%j.out` is relative to the submission cwd.
@@ -81,7 +81,7 @@ GPUS_PER_NODE=3
 NUM_PROCS=$((NUM_NODES * GPUS_PER_NODE))
 
 echo "============================================================"
-echo "[run] Variant:    MaterialsSaddlesTSGen"
+echo "[run] Variant:    MP20Bat"
 echo "[run] Date:       $(date)"
 echo "[run] Job ID:     ${SLURM_JOB_ID:-?}"
 echo "[run] Nodes:      $NUM_NODES  (${SLURM_JOB_NODELIST:-local})"
@@ -156,7 +156,7 @@ srun --nodes=1 --ntasks=1 --ntasks-per-node=1 \
       --multi_gpu \
       --mixed_precision bf16 \
       --main_process_port 29605 \
-      $REPO/examples/MaterialsSaddles/sample_and_distance_eval.py \
+      $SCRIPT_DIR/sample_and_distance_eval.py \
         --ckpt-dir $OUT_DIR/checkpoint_final \
         --subset mp20bat \
         --num-cases $EVAL_NUM_CASES \

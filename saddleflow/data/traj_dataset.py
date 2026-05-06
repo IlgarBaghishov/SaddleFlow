@@ -6,7 +6,7 @@ Every triplet yields TWO training samples (R→S and P→S), so
 `len(dataset) == 2 * total_triplets`.
 
 Use for small-to-moderate datasets (the Li/C test case). For the 30M-triplet
-run, convert once with `saddlegen.data.convert_to_db` and use `AseDbSaddleDataset`.
+run, convert once with `saddleflow.data.convert_to_db` and use `AseDbSaddleDataset`.
 """
 
 import json

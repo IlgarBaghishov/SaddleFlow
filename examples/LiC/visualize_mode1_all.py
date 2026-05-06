@@ -20,7 +20,7 @@ For each checkpoint discovered in `--run-dir`:
 
 Run while training is still going:
     CUDA_VISIBLE_DEVICES=2 python examples/LiC/visualize_mode1_all.py \\
-        --run-dir examples/LiC/runs/mode1_v0
+        --run-dir examples/LiC/runs/icecream_winner
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ def parse_args():
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--run-dir", default=str(here / "runs" / "mode1_v0"),
+    p.add_argument("--run-dir", default=str(here / "runs" / "icecream_winner"),
                    help="Directory containing checkpoint_epoch_* subdirectories. "
                         "Every matching checkpoint will be rendered.")
     p.add_argument("--no-ema", action="store_true",

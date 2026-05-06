@@ -55,7 +55,7 @@ ENDPOINT_SIDES = {-1, 1}
 
 
 def _row_to_atoms(row) -> Atoms:
-    """Reconstruct an `Atoms` with full SaddleGen-relevant info from a DB row."""
+    """Reconstruct an `Atoms` with full SaddleFlow-relevant info from a DB row."""
     atoms = row.toatoms()
     info = dict(row.data.get("info", {}))
     atoms.info.update(info)
@@ -104,7 +104,7 @@ class MaterialsSaddlesDataset(Dataset):
         First call computes & writes; later calls load it directly.
     index_cache_dir : str | None
         Where to cache the per-shard triplet-index JSON files. If None,
-        defaults to `~/.cache/saddlegen/materials_saddles_index/`. Each shard
+        defaults to `~/.cache/saddleflow/materials_saddles_index/`. Each shard
         produces a `<sha1(shard_path)>.idx.json` file.
     validate : bool
         On first index build (cache miss), verify each triplet's R/S/P
@@ -134,8 +134,8 @@ class MaterialsSaddlesDataset(Dataset):
 
         if index_cache_dir is None:
             index_cache_dir = os.environ.get(
-                "SADDLEGEN_MATERIALS_SADDLES_INDEX_DIR",
-                str(Path.home() / ".cache" / "saddlegen" / "materials_saddles_index"),
+                "SADDLEFLOW_MATERIALS_SADDLES_INDEX_DIR",
+                str(Path.home() / ".cache" / "saddleflow" / "materials_saddles_index"),
             )
         self._index_cache_dir = Path(index_cache_dir)
         self._index_cache_dir.mkdir(parents=True, exist_ok=True)

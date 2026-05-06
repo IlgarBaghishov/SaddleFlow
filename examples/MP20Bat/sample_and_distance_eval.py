@@ -20,12 +20,12 @@ and one log-axis. Reuses `saddleflow.utils.eval.rmsd_pbc` for the metric and
 
 Launch (1 node × 3 A100):
     accelerate launch --num_processes 3 --multi_gpu --mixed_precision bf16 \\
-      examples/MaterialsSaddles/sample_and_distance_eval.py \\
+      examples/MP20Bat/sample_and_distance_eval.py \\
         --ckpt-dir $SCRATCH/.../runs/.../checkpoint_final \\
         --num-cases 50
 
 Single-GPU (smoke test):
-    python examples/MaterialsSaddles/sample_and_distance_eval.py \\
+    python examples/MP20Bat/sample_and_distance_eval.py \\
         --ckpt-dir $SCRATCH/.../runs/.../checkpoint_final \\
         --num-cases 3
 """
@@ -50,12 +50,12 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# Reach the on-scratch data_prep module (official-split loader). Only used to
-# resolve the shards directory + read the train/val/test parquet splits.
-# Override via SADDLEFLOW_RUN_DIR; otherwise the bundled examples copy is used.
+# `data_prep.py` lives next to this script in this examples directory. The
+# SADDLEFLOW_RUN_DIR override exists for callers who keep their data_prep
+# helper at a custom location.
 RUN_DIR_DEFAULT = os.environ.get(
     "SADDLEFLOW_RUN_DIR",
-    str(Path(__file__).resolve().parents[1] / "MaterialsSaddlesTSGen"),
+    str(Path(__file__).resolve().parent),
 )
 sys.path.insert(0, RUN_DIR_DEFAULT)
 from data_prep import ensure_subset, load_official_splits  # noqa: E402

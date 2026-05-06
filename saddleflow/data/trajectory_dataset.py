@@ -105,7 +105,7 @@ class TrajectoryGroupedDataset(Dataset):
         if not idx_path.is_file():
             raise FileNotFoundError(
                 f"trajectory groups index not found at {groups_json!r}; "
-                f"run `python -m saddlegen.data.convert_trajectories_to_db` "
+                f"run `python -m saddleflow.data.convert_trajectories_to_db` "
                 f"to write it alongside the ASE-DB."
             )
         groups: dict = json.loads(idx_path.read_text())

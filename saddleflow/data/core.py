@@ -2,7 +2,7 @@
 Shared helpers for both data backends.
 
 A *triplet* is a contiguous (reactant, saddle, product) block of ASE Atoms, as
-found in the Henkelman-group .traj files (with `atoms.info['side']` ∈ {-1, 0, 1}).
+found in the source .traj files (with `atoms.info['side']` ∈ {-1, 0, 1}).
 
 A *pair record* is one training example: a start structure (either R or P) and
 its MIC-unwrapped saddle. Every triplet produces two pair records (R→S and

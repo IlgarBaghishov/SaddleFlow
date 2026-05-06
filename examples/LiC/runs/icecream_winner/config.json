@@ -1,5 +1,5 @@
 {
-  "output_dir": "/home/ilgar/code/SaddleGen/examples/LiC/runs/fix25_icecream_rts0p60",
+  "output_dir": "examples/LiC/runs/fix25_icecream_rts0p60",
   "num_epochs": 10000,
   "batch_size": 2,
   "num_workers": 0,

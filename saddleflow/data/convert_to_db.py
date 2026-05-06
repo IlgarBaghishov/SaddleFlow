@@ -9,7 +9,7 @@ Each triplet writes two rows, one per (start, saddle) pair, keyed by role ∈ {"
 Saddle positions are stored minimum-image-unwrapped relative to their start.
 
 Usage:
-    python -m saddlegen.data.convert_to_db \\
+    python -m saddleflow.data.convert_to_db \\
         --traj 'data/raw/*.traj' \\
         --out  data/processed/li_c.aselmdb \\
         --default-task-name omat

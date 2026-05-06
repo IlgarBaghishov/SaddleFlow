@@ -32,7 +32,7 @@ groups in this dict format; we read groups one at a time, extend the ASE-DB
 with one row per `Atoms`, and accumulate the row id list per group_id.
 
 Usage (once the data is ready):
-    python -m saddlegen.data.convert_trajectories_to_db \\
+    python -m saddleflow.data.convert_trajectories_to_db \\
         --raw  path/to/source/data \\
         --out  data/processed/li_c_trajectories.aselmdb \\
         --groups-out  data/processed/li_c_trajectories.groups.json \\

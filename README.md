@@ -113,4 +113,4 @@ Anonymous (double-blind submission).
 
 ## License
 
-TBD (will likely be MIT, matching fairchem).
+MIT — see [`LICENSE`](LICENSE).
