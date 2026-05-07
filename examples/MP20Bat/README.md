@@ -64,7 +64,7 @@ $SCRATCH/MaterialsSaddles/                                   ← dataset, auto-s
 ### 0. Environment
 
 Required:
-- `$SCRATCH` — fast scratch path. On TACC machines this is set automatically.
+- `$SCRATCH` — fast scratch path. Most Slurm sites set this automatically.
 - `$WORK` — long-term project path.
 - `python` with `torch`, `accelerate`, `fairchem-core`, `ase`, `pyarrow`,
   `huggingface_hub` (and a `HF_TOKEN` env var if HF rate-limits you on the

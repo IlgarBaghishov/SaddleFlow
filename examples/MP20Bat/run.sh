@@ -16,14 +16,14 @@
 # 1 node × 3 GPUs and writes parity plots + 4-frame .traj files.
 #
 # ---- Required environment overrides ----
-#   $SCRATCH                 — fast scratch root (TACC sets automatically)
-#   $WORK                    — long-term project directory (TACC ditto)
+#   $SCRATCH                 — fast scratch root (most Slurm sites set this automatically)
+#   $WORK                    — long-term project directory (ditto)
 #   SADDLEFLOW_PYTHON         — python interpreter (default: `python` on $PATH)
 #   SADDLEFLOW_RUN_ROOT       — where runs/ subdir lives
 #                              default: $SCRATCH/SaddleFlow_mp20bat
 #   SADDLEFLOW_REPO           — root of the SaddleFlow repo
 #                              default: $(realpath script_dir/../..)
-#   #SBATCH -A               — REPLACE `_replace_me_` with your TACC allocation
+#   #SBATCH -A               — REPLACE `_replace_me_` with your Slurm allocation
 #
 # Submission:
 #   cd $SCRATCH/SaddleFlow_mp20bat && sbatch /path/to/run.sh
@@ -47,11 +47,11 @@ PYTHON="${SADDLEFLOW_PYTHON:-python}"
 
 # SLURM `#SBATCH -o logs/slurm_%j.out` is relative to the submission cwd.
 # Submit with `cd $SADDLEFLOW_RUN_ROOT && sbatch /path/to/run.sh` so logs land
-# on scratch — never on $WORK (which has tighter quotas on TACC).
+# on scratch — never on $WORK (which often has tighter quotas).
 mkdir -p "$OUT_DIR" "$RUN_ROOT/logs"
 cd "$RUN_ROOT"
 
-# TACC-style module loads — comment out / replace on other clusters.
+# Module loads (Lmod) — comment out / replace on other clusters.
 module unload impi python3 2>/dev/null || true
 module load cuda/12.8 2>/dev/null || true
 

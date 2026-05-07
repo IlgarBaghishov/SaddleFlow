@@ -44,7 +44,7 @@ saddleflow/data/**/*.pyc
 *.h5
 *.hdf5
 
-# NERSC / SLURM
+# SLURM
 slurm*.log
 slurm-*.out
 *.err
