@@ -7,7 +7,7 @@ parity scatters (PNG + PDF):
   - parity_all_atoms_log.{png,pdf} all-atom RMSD (PBC)
 
 Both plots use the same design we converged on:
-  * log-log axes (TSGenerator on x, Midpoint baseline on y)
+  * log-log axes (SaddleFlow on x, Midpoint baseline on y)
   * marginal histograms with mean (black dashed) and median (darkviolet solid) lines
   * inline labels along each line, sized to the tick fonts
   * legend showing fraction of cases each method won
@@ -45,9 +45,9 @@ def parity_log(x: np.ndarray, y: np.ndarray, *, x_label: str, y_label: str,
                out_stem: Path) -> None:
     """One log-log parity scatter with marginal histograms and mean/median lines.
 
-    `x` is the TSGenerator metric, `y` is the Midpoint baseline. Lower is better
+    `x` is the SaddleFlow metric, `y` is the Midpoint baseline. Lower is better
     for both (RMSD or max-atom-disp), so the goal is for points to fall above
-    the y=x line (TSGenerator's metric is smaller than the baseline's).
+    the y=x line (SaddleFlow's metric is smaller than the baseline's).
     """
     N = len(x)
     x_mean, x_med = float(x.mean()), float(np.median(x))
@@ -71,7 +71,7 @@ def parity_log(x: np.ndarray, y: np.ndarray, *, x_label: str, y_label: str,
     n_sg = int(sg_better.sum()); n_mp = N - n_sg
     ax_main.scatter(x_p[sg_better],  y_p[sg_better],
                     s=14, color="tab:blue", edgecolor="black", linewidth=0.2, alpha=0.55,
-                    label=f"TSGenerator better ({n_sg}/{N}, {100*n_sg/N:.1f}%)")
+                    label=f"SaddleFlow better ({n_sg}/{N}, {100*n_sg/N:.1f}%)")
     ax_main.scatter(x_p[~sg_better], y_p[~sg_better],
                     s=14, color="tab:red", edgecolor="black", linewidth=0.2, alpha=0.55,
                     label=f"Midpoint better ({n_mp}/{N}, {100*n_mp/N:.1f}%)")
@@ -82,7 +82,7 @@ def parity_log(x: np.ndarray, y: np.ndarray, *, x_label: str, y_label: str,
     ax_main.legend(loc="upper left", fontsize=LEG_FS, framealpha=0.95)
     ax_main.grid(True, which="both", alpha=0.25)
 
-    # Top marginal: TSGenerator distribution. Horizontal labels, staggered in y.
+    # Top marginal: SaddleFlow distribution. Horizontal labels, staggered in y.
     ax_top.hist(x_p, bins=bins, color="tab:blue", edgecolor="black",
                 linewidth=0.3, alpha=0.85)
     ax_top.axvline(x_mean, color=MEAN_COLOR,   linestyle=MEAN_LS,   linewidth=LINE_LW, alpha=1.0)
@@ -145,7 +145,7 @@ def main():
     # max-atom-displacement parity (the chosen final figure).
     parity_log(
         d["maxd_pred_all"], d["maxd_base_all"],
-        x_label="TSGenerator prediction max-atom-disp (Å)",
+        x_label="SaddleFlow prediction max-atom-disp (Å)",
         y_label="Midpoint baseline max-atom-disp (Å)",
         out_stem=run_dir / "parity_maxdisp_log",
     )
@@ -153,7 +153,7 @@ def main():
     # all-atom RMSD parity (same design).
     parity_log(
         d["rmsd_pred_all"], d["rmsd_base_all"],
-        x_label="TSGenerator prediction RMSD (Å)",
+        x_label="SaddleFlow prediction RMSD (Å)",
         y_label="Midpoint baseline RMSD (Å)",
         out_stem=run_dir / "parity_all_atoms_log",
     )
